@@ -1,0 +1,90 @@
+#cloud-config
+autoinstall:
+  version: 1
+  # Disable interactive sections
+  interactive-sections: []
+  
+  # Locale and keyboard
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+    variant: ""
+    
+  # Network configuration - DHCP by default
+  network:
+    version: 2
+    ethernets:
+      enp0s5:  # Parallels default interface name on ARM64
+        dhcp4: true
+        dhcp6: false
+        
+  # Storage configuration - use entire disk
+  storage:
+    layout:
+      name: direct
+      match:
+        size: largest
+      
+  # Identity configuration - will be overridden by cloud-init
+  identity:
+    hostname: ubuntu-temp
+    username: ubuntu
+    # Password is 'ubuntu' - will be disabled after cloud-init runs
+    password: "$6$rounds=4096$8dkK1P/oE$2DGKKt0wLlTVJ7USY.0jN9du8FetmEr51yjPyeiR.zKE3DGFcitNL/nF1l62BLJNR87lQZixObuXYny.Mf17K1"
+    
+  # SSH configuration
+  ssh:
+    install-server: true
+    allow-pw: false  # Disable password auth after keys are installed
+    
+  # Package selection
+  packages:
+    - qemu-guest-agent
+    - cloud-init
+    - python3
+    - curl
+    - wget
+    - vim
+    - net-tools
+    
+  # Disable apt updates during install for speed
+  updates: security
+  
+  # Late commands - prepare for cloud-init
+  late-commands:
+    # Ensure cloud-init is enabled
+    - curtin in-target --target=/target -- systemctl enable cloud-init
+    - curtin in-target --target=/target -- systemctl enable cloud-init-local
+    - curtin in-target --target=/target -- systemctl enable cloud-config
+    - curtin in-target --target=/target -- systemctl enable cloud-final
+    # Clean cloud-init to ensure it runs on first boot
+    - curtin in-target --target=/target -- cloud-init clean
+    # Remove default user if exists (cloud-init will recreate)
+    - curtin in-target --target=/target -- deluser --remove-home ubuntu || true
+    # Ensure guest tools are enabled for Parallels
+    - curtin in-target --target=/target -- systemctl enable qemu-guest-agent
+    
+  # User data for first boot cloud-init
+  user-data:
+    disable_root: true
+    package_update: true
+    package_upgrade: false
+    
+    # This will be merged with data from OpenTofu/Parallels
+    users:
+      - name: ubuntu
+        groups: [adm, audio, cdrom, dialout, dip, floppy, lxd, netdev, plugdev, sudo, video]
+        sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+        shell: /bin/bash
+        lock_passwd: true
+        # SSH keys will be injected by OpenTofu
+        ssh_authorized_keys: []
+        
+    # Enable password authentication temporarily for initial setup
+    ssh_pwauth: false
+    
+    # Timezone
+    timezone: UTC
+    
+    # Final message
+    final_message: "Ubuntu installation completed in $UPTIME seconds"

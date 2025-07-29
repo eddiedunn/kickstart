@@ -1,0 +1,84 @@
+# Build artifacts
+/work/
+/output/
+*.iso
+*.img
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+.DS_Store
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+*.sublime-*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.env
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Terraform/OpenTofu
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+*.tfvars
+!terraform.tfvars.example
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Cloud-init
+cloud-init-output.log
+/var/log/cloud-init*
+
+# SSH keys (never commit these)
+*.pem
+*.key
+id_rsa*
+id_ecdsa*
+id_ed25519*
+known_hosts
+
+# Secrets and credentials
+**/secrets/
+**/credentials/
+*.secret
+*.password
+*.passwd
+
+# Log files
+*.log
+logs/
+
+# Cache directories
+.cache/
+cache/
+
+# Test outputs
+test-results/
+coverage/
