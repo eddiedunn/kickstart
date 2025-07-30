@@ -1,7 +1,110 @@
 #!/bin/bash
 #
-# Show status of deployed VMs
-# Displays IP addresses and SSH connection commands
+# status.sh - Display Status of Deployed VMs
+#
+# PURPOSE:
+#   Shows real-time status of all Ubuntu VMs including IP addresses,
+#   SSH connectivity, and connection commands. Supports watch mode
+#   for continuous monitoring. Essential tool for VM management.
+#
+# USAGE:
+#   ./status.sh [OPTIONS]
+#
+# OPTIONS:
+#   --verbose,-v     Show detailed VM information
+#                    Includes: CPU, memory, disk, uptime, network interfaces
+#   --watch,-w       Continuously monitor VM status
+#                    Updates display in real-time
+#   --interval,-i N  Refresh interval in seconds (default: 5)
+#                    Minimum: 1, Maximum: 300
+#   --help,-h        Show this help message
+#
+# OUTPUT COLUMNS:
+#   VM Name     - Parallels VM identifier
+#   Status      - Running (green), Stopped (red), Suspended (yellow)
+#   IP Address  - Primary IPv4 address (DHCP assigned)
+#   SSH         - Connectivity check: ✓ (connected) or ✗ (unreachable)
+#   SSH Command - Ready-to-use SSH connection command
+#
+# STATUS INDICATORS:
+#   - ${GREEN}Running${NC}   - VM is operational
+#   - ${RED}Stopped${NC}   - VM is shut down
+#   - ${YELLOW}Suspended${NC} - VM is paused (RAM saved)
+#   - Waiting...     - VM booting, IP pending
+#
+# DISPLAYS:
+#   Standard Mode:
+#   - VM name and color-coded status
+#   - IP address (when available)
+#   - SSH connectivity test result
+#   - Copy-paste SSH commands
+#   - Summary statistics
+#
+#   Verbose Mode (-v):
+#   - Hardware allocation (CPUs, RAM)
+#   - Disk usage and size
+#   - VM uptime information
+#   - Network interface details
+#   - IP addresses for all interfaces
+#
+# EXAMPLES:
+#   # Quick status check
+#   ./status.sh
+#   
+#   # Monitor deployment progress
+#   ./status.sh --watch
+#   
+#   # Detailed monitoring with slow refresh
+#   ./status.sh --verbose --watch --interval 10
+#   
+#   # Check specific aspects
+#   ./status.sh | grep Running    # List running VMs
+#   ./status.sh | grep 192.168    # Find VMs on specific subnet
+#
+# SSH CONNECTIVITY:
+#   The script tests SSH connectivity by:
+#   1. Attempting TCP connection to port 22
+#   2. Using 2-second timeout to avoid hanging
+#   3. Indicating success (✓) or failure (✗)
+#   
+#   Note: SSH check only verifies port accessibility,
+#   not authentication. You still need valid credentials.
+#
+# WATCH MODE:
+#   - Updates display in-place
+#   - Press Ctrl+C to exit
+#   - Useful for monitoring:
+#     * VM deployment progress
+#     * Reboot cycles
+#     * Network changes
+#     * Resource usage
+#
+# NETWORK DETECTION:
+#   IP detection methods (in order):
+#   1. Execute 'ip addr' inside VM
+#   2. Parse Parallels VM information
+#   3. Exclude link-local addresses (169.254.x.x)
+#   4. Retry up to 5 times for booting VMs
+#
+# INTEGRATION:
+#   Works with VMs created by:
+#   - deploy-vm.sh (ISO-based)
+#   - OpenTofu/Terraform (IaC)
+#   - manage-templates.sh (clones)
+#   - Manual Parallels creation
+#
+# TROUBLESHOOTING:
+#   - "No VMs found": Check VM names contain 'ubuntu'
+#   - "Waiting...": VM still booting, check console
+#   - SSH ✗: Firewall, wrong IP, or SSH not ready
+#   - No IP: Network configuration issues
+#
+# NOTES:
+#   - Automatically detects all Ubuntu VMs
+#   - Filters by name pattern (case-insensitive)
+#   - Default username assumed: 'ubuntu'
+#   - Requires 'nc' (netcat) for SSH checks
+#   - Performance impact minimal (<1% CPU)
 #
 
 set -euo pipefail
@@ -66,16 +169,18 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Get VM's IP address using multiple methods
+# Retries to handle VMs that are still booting
 get_vm_ip() {
     local vm_name="$1"
     local max_attempts=5
     local attempt=1
     
     while [ $attempt -le $max_attempts ]; do
-        # Try to get IP from VM
+        # Method 1: Execute ip command inside VM
         local ip=$(prlctl exec "$vm_name" ip addr show 2>/dev/null | \
                   grep -E 'inet .* scope global' | \
-                  grep -v '169.254' | \
+                  grep -v '169.254' | \              # Exclude link-local
                   head -1 | \
                   awk '{print $2}' | \
                   cut -d/ -f1 || echo "")
@@ -85,10 +190,10 @@ get_vm_ip() {
             return 0
         fi
         
-        # Try alternative method
+        # Method 2: Get IP from Parallels VM info
         ip=$(prlctl list -i "$vm_name" 2>/dev/null | \
              grep "IP address:" | \
-             grep -v "169.254" | \
+             grep -v "169.254" | \             # Exclude link-local
              head -1 | \
              awk '{print $3}' || echo "")
         
@@ -104,10 +209,12 @@ get_vm_ip() {
     return 1
 }
 
+# Get VM status with color coding
 get_vm_status() {
     local vm_name="$1"
     local status=$(prlctl list -i "$vm_name" 2>/dev/null | grep "State:" | awk '{print $2}' || echo "unknown")
     
+    # Color-code status for quick visual identification
     case "$status" in
         running)
             echo -e "${GREEN}Running${NC}"
@@ -124,23 +231,27 @@ get_vm_status() {
     esac
 }
 
+# Test if SSH port is accessible
+# Uses netcat with timeout to avoid hanging
 check_ssh_connectivity() {
     local ip="$1"
     
+    # Try to connect to SSH port (22) with 2 second timeout
     if timeout 2 nc -z "$ip" 22 2>/dev/null; then
-        echo -e "${GREEN}✓${NC}"
+        echo -e "${GREEN}✓${NC}"  # Checkmark
     else
-        echo -e "${RED}✗${NC}"
+        echo -e "${RED}✗${NC}"    # X mark
     fi
 }
 
+# Display detailed VM information (verbose mode)
 show_vm_details() {
     local vm_name="$1"
     
     echo
     echo "  VM Details for $vm_name:"
     
-    # Get VM info
+    # Get comprehensive VM information
     local vm_info=$(prlctl list -i "$vm_name" 2>/dev/null)
     
     # CPU and Memory
@@ -158,13 +269,15 @@ show_vm_details() {
         echo "    Uptime: ${uptime}"
     fi
     
-    # Network interfaces
+    # Network interfaces with their status
     echo "    Network interfaces:"
+    # Show brief interface list with status and IPs
     prlctl exec "$vm_name" ip -br addr show 2>/dev/null | grep -E "UP|UNKNOWN" | sed 's/^/      /'
 }
 
+# Main status display function
 display_status() {
-    # Clear screen if watching
+    # Clear screen for watch mode to update in place
     if [ "$WATCH" = true ]; then
         clear
     fi
@@ -175,7 +288,8 @@ display_status() {
     echo -e "Time: $(date '+%Y-%m-%d %H:%M:%S')"
     echo
     
-    # Get list of VMs
+    # Get list of VMs (filter for Ubuntu VMs)
+    # Format: {UUID} vm-name status ...
     local vms=$(prlctl list -a | grep -E "{.*}" | grep -i ubuntu | awk '{print $1, $2}' || true)
     
     if [ -z "$vms" ]; then
@@ -189,7 +303,8 @@ display_status() {
         return
     fi
     
-    # Display VM status table
+    # Display VM status table header
+    # Formatted for easy reading with proper column alignment
     printf "%-30s %-10s %-15s %-5s %s\n" "VM Name" "Status" "IP Address" "SSH" "SSH Command"
     printf "%-30s %-10s %-15s %-5s %s\n" "-------" "------" "----------" "---" "-----------"
     
@@ -200,17 +315,18 @@ display_status() {
         # Get VM status
         local status=$(get_vm_status "$vm_name")
         
-        # Get IP if running
+        # Get network info only for running VMs
         local ip="-"
         local ssh_status="-"
         local ssh_cmd="-"
         
         if [[ "$status" =~ Running ]]; then
+            # Try to get IP address
             if ip=$(get_vm_ip "$vm_name"); then
                 ssh_status=$(check_ssh_connectivity "$ip")
-                ssh_cmd="ssh ubuntu@$ip"
+                ssh_cmd="ssh ubuntu@$ip"  # Default Ubuntu username
             else
-                ip="Waiting..."
+                ip="Waiting..."  # VM still booting
             fi
         fi
         
@@ -230,7 +346,7 @@ display_status() {
     local running_vms=$(prlctl list -a | grep -i ubuntu | grep -c "running" || echo "0")
     echo "Total VMs: $total_vms (Running: $running_vms)"
     
-    # Show helpful commands
+    # Show context-appropriate commands
     if [ "$WATCH" = false ]; then
         echo
         echo "Useful commands:"

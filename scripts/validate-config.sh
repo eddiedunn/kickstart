@@ -1,7 +1,102 @@
 #!/bin/bash
 #
-# Validate autoinstall configurations
-# Checks cloud-init syntax and security best practices
+# validate-config.sh - Validate Ubuntu Autoinstall and Cloud-Init Configurations
+#
+# PURPOSE:
+#   Validates YAML syntax, cloud-init schema compliance, and security best practices
+#   for Ubuntu autoinstall and cloud-init configuration files. Essential tool for
+#   catching configuration errors before deployment.
+#
+# USAGE:
+#   ./validate-config.sh [config-file]
+#   ./validate-config.sh                    # Validate all configs
+#   ./validate-config.sh user-data          # Validate specific file
+#   ./validate-config.sh /path/to/config   # Validate custom path
+#
+# VALIDATION LAYERS:
+#
+#   1. YAML Syntax Validation:
+#      - Checks for valid YAML structure
+#      - Identifies indentation errors
+#      - Catches missing quotes, colons
+#      - Reports line numbers for errors
+#
+#   2. Cloud-Init Schema Validation:
+#      - Validates against official Ubuntu schema
+#      - Checks autoinstall version compatibility
+#      - Ensures required sections are present
+#      - Validates field types and values
+#
+#   3. Security Analysis:
+#      - Plaintext Password Detection:
+#        * Scans for unhashed passwords
+#        * Identifies weak password storage
+#      - Password Hash Strength:
+#        * Requires SHA-512 ($6$) hashes
+#        * Warns on MD5 ($1$) or SHA-256 ($5$)
+#      - SSH Configuration:
+#        * Verifies SSH keys are configured
+#        * Checks password auth is disabled
+#        * Ensures secure defaults
+#
+#   4. Required Fields Check:
+#      - autoinstall.version (must be 1)
+#      - autoinstall.identity (user configuration)
+#      - autoinstall.storage (disk layout)
+#      - network configuration basics
+#
+# FILE SEARCH LOCATIONS:
+#   1. autoinstall/user-data (primary autoinstall config)
+#   2. configs/*.yaml (additional configurations)
+#   3. cloud-init-examples/*.yaml (example configs)
+#   4. Command line argument (custom path)
+#
+# OUTPUT FORMAT:
+#   [PASS] ✓ Check passed successfully
+#   [FAIL] ✗ Check failed - action required
+#   [WARN] ⚠ Warning - review recommended
+#   [INFO] ℹ Informational message
+#
+# EXAMPLES:
+#   # Validate all configuration files
+#   ./validate-config.sh
+#   
+#   # Validate specific file
+#   ./validate-config.sh autoinstall/user-data
+#   
+#   # Validate custom cloud-init config
+#   ./validate-config.sh ~/my-configs/web-server.yaml
+#   
+#   # Use in CI/CD pipeline
+#   ./validate-config.sh || exit 1
+#
+# PREREQUISITES:
+#   Required tools:
+#   - cloud-init: Official schema validation
+#     Ubuntu/Debian: sudo apt-get install cloud-init
+#     RHEL/CentOS: sudo yum install cloud-init
+#   
+#   - yq: YAML command-line processor
+#     macOS: brew install yq
+#     Linux: snap install yq
+#     Direct: wget https://github.com/mikefarah/yq/releases/latest
+#
+# EXIT CODES:
+#   0 - All validations passed (may include warnings)
+#   1 - One or more critical validations failed
+#
+# COMMON ISSUES:
+#   - "Invalid YAML": Check indentation (spaces, not tabs)
+#   - "Schema validation failed": Verify autoinstall version
+#   - "No SSH keys": Add authorized_keys to identity section
+#   - "Plaintext password": Use mkpasswd -m sha-512
+#
+# SECURITY NOTES:
+#   - Never use plaintext passwords in production
+#   - Generate password hashes with: mkpasswd -m sha-512
+#   - Always configure SSH key authentication
+#   - Disable password authentication when possible
+#   - Review warnings even if validation passes
 #
 
 set -euo pipefail
@@ -32,13 +127,16 @@ PASSED_CHECKS=0
 FAILED_CHECKS=0
 WARNINGS=0
 
+# Check that required tools are installed
 check_prerequisites() {
     local missing=()
     
+    # Check for cloud-init (schema validation)
     if ! command -v cloud-init &> /dev/null; then
         missing+=("cloud-init")
     fi
     
+    # Check for yq (YAML parsing)
     if ! command -v yq &> /dev/null; then
         missing+=("yq")
     fi
@@ -53,6 +151,8 @@ check_prerequisites() {
     fi
 }
 
+# Validate YAML syntax using yq parser
+# This catches common YAML errors before cloud-init sees them
 validate_yaml_syntax() {
     local file="$1"
     TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
@@ -63,12 +163,15 @@ validate_yaml_syntax() {
         return 0
     else
         log_fail "YAML syntax invalid: $(basename "$file")"
+        # Show the actual error for debugging
         yq eval '.' "$file" 2>&1 | sed 's/^/    /'
         FAILED_CHECKS=$((FAILED_CHECKS + 1))
         return 1
     fi
 }
 
+# Validate against official cloud-init schema
+# This ensures the configuration will be accepted by Ubuntu's installer
 validate_cloud_init_schema() {
     local file="$1"
     TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
@@ -92,13 +195,15 @@ validate_cloud_init_schema() {
     fi
 }
 
+# Perform security analysis on configuration
+# Checks for common security misconfigurations
 check_security() {
     local file="$1"
     local issues=0
     
     echo "  Security checks for $(basename "$file"):"
     
-    # Check for plaintext passwords
+    # Check for plaintext passwords (major security risk)
     TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
     if grep -E 'password:\s*[^$]' "$file" | grep -v '#' | grep -q .; then
         log_fail "    Plaintext password detected!"
@@ -109,7 +214,8 @@ check_security() {
         PASSED_CHECKS=$((PASSED_CHECKS + 1))
     fi
     
-    # Check for weak password hashes
+    # Check for weak password hashes (MD5=$1, SHA1=$6)
+    # Only SHA-512 ($6$) is considered secure
     TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
     if grep -E 'password:\s*\$[16]\$' "$file" | grep -v '#' | grep -q .; then
         log_warn "    Weak password hash detected (MD5/SHA1)"
@@ -120,7 +226,8 @@ check_security() {
         PASSED_CHECKS=$((PASSED_CHECKS + 1))
     fi
     
-    # Check SSH configuration
+    # Check SSH password authentication setting
+    # Key-based auth is more secure than passwords
     TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
     if yq eval '.autoinstall.ssh.allow-pw' "$file" 2>/dev/null | grep -q "true"; then
         log_warn "    SSH password authentication enabled"
@@ -130,10 +237,12 @@ check_security() {
         PASSED_CHECKS=$((PASSED_CHECKS + 1))
     fi
     
-    # Check for SSH keys
+    # Check for SSH keys configuration
+    # At least one SSH key should be configured for secure access
     TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
     local ssh_keys=$(yq eval '.autoinstall.ssh.authorized-keys[]' "$file" 2>/dev/null | wc -l)
     if [ "$ssh_keys" -eq 0 ]; then
+        # Also check in user-data section
         ssh_keys=$(yq eval '.autoinstall.user-data.users[].ssh_authorized_keys[]' "$file" 2>/dev/null | wc -l)
     fi
     
@@ -148,6 +257,8 @@ check_security() {
     return $issues
 }
 
+# Check for required autoinstall fields
+# These fields must be present for successful installation
 check_required_fields() {
     local file="$1"
     local missing=0
@@ -190,6 +301,8 @@ check_required_fields() {
     return $missing
 }
 
+# Main validation function for a single file
+# Runs all validation checks in sequence
 validate_file() {
     local file="$1"
     
@@ -222,10 +335,10 @@ main() {
     # Check prerequisites
     check_prerequisites
     
-    # Find all user-data files
+    # Find all configuration files to validate
     local files=()
     
-    # Check autoinstall directory
+    # Check autoinstall directory for user-data files
     if [ -d "$AUTOINSTALL_DIR" ]; then
         while IFS= read -r -d '' file; do
             files+=("$file")

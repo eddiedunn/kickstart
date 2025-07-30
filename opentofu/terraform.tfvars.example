@@ -1,53 +1,205 @@
-# OpenTofu variables for Ubuntu autoinstall deployment
-# Copy this file to terraform.tfvars and customize
+# terraform.tfvars.example - ISO-based VM Deployment Configuration
+#
+# This file contains example configurations for deploying Ubuntu VMs from
+# autoinstall ISOs. Copy this file to terraform.tfvars and customize for
+# your environment.
+#
+# Usage:
+#   cp terraform.tfvars.example terraform.tfvars
+#   # Edit terraform.tfvars with your settings
+#   tofu init
+#   tofu apply
 
-# Single VM deployment (simple mode)
-# Uncomment and customize these if you want a single VM:
-# default_cpus      = 2
-# default_memory    = 4096  # MB
-# default_disk_size = 30    # GB
-# default_iso_path  = "../output/ubuntu-22.04.5-autoinstall-arm64.iso"
+# =============================================================================
+# DEPLOYMENT MODES
+# =============================================================================
 
-# Multi-VM deployment (stack mode)
-# Define multiple VMs for your development stack:
+# Option 1: Single VM Deployment (Simple Mode)
+# Uncomment these lines to deploy a single VM with default settings.
+# The VM will be named "ubuntu-server" and use these specifications:
+#
+# default_cpus      = 2      # Number of CPU cores
+# default_memory    = 4096   # RAM in MB (4GB)
+# default_disk_size = 30     # Disk size in GB
+# default_iso_path  = "../output/ubuntu-autoinstall.iso"
+
+# Option 2: Multi-VM Deployment (Recommended)
+# Define multiple VMs with specific configurations.
+# Each key becomes a unique VM instance.
 vm_definitions = {
+  # Web Server VM
   "web" = {
-    name        = "ubuntu-web"
-    cpus        = 2
-    memory      = 2048
-    disk_size   = 20
-    iso_path    = "../output/ubuntu-22.04.5-autoinstall-arm64.iso"
-    network     = "shared"
-    start_after = []
+    name        = "ubuntu-web"        # VM name in Parallels
+    cpus        = 2                   # 2 cores for web workload
+    memory      = 2048                # 2GB RAM
+    disk_size   = 20                  # 20GB disk (OS + apps)
+    iso_path    = "../output/ubuntu-autoinstall.iso"
+    network     = "shared"            # NAT networking
+    start_after = []                  # No dependencies
   },
+  
+  # Database Server VM
   "db" = {
-    name        = "ubuntu-db"
-    cpus        = 4
-    memory      = 4096
-    disk_size   = 50
-    iso_path    = "../output/ubuntu-22.04.5-autoinstall-arm64.iso"
+    name        = "ubuntu-db"         # Database server
+    cpus        = 4                   # More CPU for queries
+    memory      = 4096                # 4GB for database
+    disk_size   = 50                  # Larger disk for data
+    iso_path    = "../output/ubuntu-autoinstall.iso"
     network     = "shared"
-    start_after = []
+    start_after = []                  # Independent start
   },
+  
+  # Cache/Redis Server VM
   "cache" = {
-    name        = "ubuntu-cache"
-    cpus        = 2
-    memory      = 2048
-    disk_size   = 20
-    iso_path    = "../output/ubuntu-22.04.5-autoinstall-arm64.iso"
+    name        = "ubuntu-cache"      # Cache server
+    cpus        = 2                   # Light CPU usage
+    memory      = 2048                # 2GB for caching
+    disk_size   = 20                  # Small disk needed
+    iso_path    = "../output/ubuntu-autoinstall.iso"
     network     = "shared"
-    start_after = ["db"]  # Start after db VM
+    start_after = ["db"]             # Start after database
   }
+  
+  # Add more VMs as needed:
+  # "app" = {
+  #   name        = "ubuntu-app"
+  #   cpus        = 4
+  #   memory      = 8192
+  #   disk_size   = 40
+  #   iso_path    = "../output/ubuntu-autoinstall.iso"
+  #   network     = "shared"
+  #   start_after = ["db", "cache"]
+  # }
 }
 
-# SSH Configuration
-# Leave empty to auto-detect from ~/.ssh/
-# Or specify a path: ssh_public_key_path = "/Users/username/.ssh/id_ed25519.pub"
+# =============================================================================
+# SSH CONFIGURATION
+# =============================================================================
+
+# SSH public key for VM access
+# Leave empty "" to auto-detect from standard locations:
+# - ~/.ssh/id_ed25519.pub (preferred)
+# - ~/.ssh/id_rsa.pub
+# - ~/.ssh/id_ecdsa.pub
+#
+# Or specify a custom path:
+# ssh_public_key_path = "/Users/username/.ssh/custom_key.pub"
+# ssh_public_key_path = "~/.ssh/deploy_key.pub"
 ssh_public_key_path = ""
 
-# VM Display Settings
-headless = true  # Set to false if you want to see VM console windows
+# =============================================================================
+# VM DISPLAY SETTINGS
+# =============================================================================
 
-# Advanced Settings
+# Headless mode - VMs run without GUI windows
+# - true:  No VM console windows (server mode)
+# - false: Show VM console windows (debugging/desktop)
+headless = true
+
+# =============================================================================
+# ADVANCED SETTINGS
+# =============================================================================
+
+# Nested virtualization support
+# Enable to run containers/VMs inside VMs (Docker, KVM, etc.)
+# May impact performance on some systems
 enable_nested_virt = true
-time_zone          = "UTC"
+
+# System timezone for VMs
+# UTC recommended for servers to avoid DST issues
+# Examples: "UTC", "America/New_York", "Europe/London", "Asia/Tokyo"
+time_zone = "UTC"
+
+# =============================================================================
+# NETWORK CONFIGURATION OPTIONS
+# =============================================================================
+# 
+# Available network modes for VMs:
+# 
+# "shared" (default - recommended):
+#   - NAT with the host system
+#   - VMs can access internet
+#   - VMs can communicate with each other
+#   - Host can access VMs
+#   - No configuration needed
+# 
+# "host":
+#   - Host-only network
+#   - VMs isolated from external network
+#   - Good for secure development
+#   - Requires additional setup for internet access
+# 
+# "bridged":
+#   - VMs get IP from physical network DHCP
+#   - VMs appear as separate machines on network
+#   - Requires network administrator approval in corporate environments
+#   - May not work with WiFi on some systems
+
+# =============================================================================
+# ISO PATH CONFIGURATION
+# =============================================================================
+# 
+# The iso_path should point to an Ubuntu autoinstall ISO created with:
+#   ./scripts/build-autoinstall-iso.sh ubuntu-22.04.5-live-server-arm64.iso
+# 
+# Paths can be:
+# - Relative: "../output/ubuntu-autoinstall.iso"
+# - Absolute: "/Users/username/isos/ubuntu-autoinstall.iso"
+# 
+# For ARM64 Macs (Apple Silicon):
+#   Use: ubuntu-22.04.5-live-server-arm64.iso
+# 
+# For Intel Macs:
+#   Use: ubuntu-22.04.5-live-server-amd64.iso
+
+# =============================================================================
+# EXAMPLE CONFIGURATIONS
+# =============================================================================
+
+# Minimal single VM:
+# vm_definitions = {
+#   "test" = {
+#     name      = "ubuntu-test"
+#     cpus      = 2
+#     memory    = 2048
+#     disk_size = 20
+#     iso_path  = "../output/ubuntu-autoinstall.iso"
+#   }
+# }
+
+# Development environment:
+# vm_definitions = {
+#   "dev" = {
+#     name      = "dev-environment"
+#     cpus      = 4
+#     memory    = 8192
+#     disk_size = 50
+#     iso_path  = "../output/ubuntu-autoinstall.iso"
+#     network   = "shared"
+#   }
+# }
+
+# Kubernetes cluster:
+# vm_definitions = {
+#   "k8s-master" = {
+#     name      = "k8s-master"
+#     cpus      = 4
+#     memory    = 4096
+#     disk_size = 30
+#     iso_path  = "../output/ubuntu-autoinstall.iso"
+#   },
+#   "k8s-worker-1" = {
+#     name      = "k8s-worker-1"
+#     cpus      = 4
+#     memory    = 8192
+#     disk_size = 50
+#     iso_path  = "../output/ubuntu-autoinstall.iso"
+#   },
+#   "k8s-worker-2" = {
+#     name      = "k8s-worker-2"
+#     cpus      = 4
+#     memory    = 8192
+#     disk_size = 50
+#     iso_path  = "../output/ubuntu-autoinstall.iso"
+#   }
+# }

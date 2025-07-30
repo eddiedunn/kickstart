@@ -1,3 +1,13 @@
+# parallels-vm module - Flexible VM deployment for Parallels Desktop
+#
+# This module supports three deployment methods:
+# 1. Template cloning (fastest, recommended for production)
+# 2. PVM bundle import (for VM distribution)
+# 3. ISO installation (for initial VM creation)
+#
+# The module automatically detects which method to use based on
+# the provided variables.
+
 terraform {
   required_providers {
     parallels-desktop = {
@@ -13,12 +23,14 @@ terraform {
 
 # Local values for deployment logic
 locals {
-  # Determine deployment method
+  # Determine deployment method based on provided variables
+  # Only one method should be specified at a time
   deploy_from_template = var.template_uuid != "" || var.template_name != ""
   deploy_from_bundle   = var.pvm_bundle_path != ""
   deploy_from_iso      = var.iso_path != ""
   
-  # VM unique identifier
+  # Generate unique VM identifier for tracking
+  # Combines name with timestamp hash to handle recreations
   vm_id = "${var.name}-${substr(md5(timestamp()), 0, 8)}"
 }
 

@@ -1,90 +1,164 @@
 #cloud-config
+# Ubuntu Autoinstall Configuration for Parallels Desktop VMs
+#
+# This file defines the automated installation parameters for Ubuntu Server.
+# It's embedded in custom ISOs created by build-autoinstall-iso.sh and
+# performs completely unattended installations.
+#
+# Documentation: https://ubuntu.com/server/docs/install/autoinstall
+
 autoinstall:
+  # Autoinstall schema version (required)
+  # Version 1 is the current stable version for Ubuntu 20.04+
   version: 1
-  # Disable interactive sections
+  
+  # Disable interactive sections for fully automated installation
+  # Empty array means no user interaction required
   interactive-sections: []
   
-  # Locale and keyboard
+  # System locale configuration
+  # Sets language, currency, date formats, etc.
   locale: en_US.UTF-8
+  
+  # Keyboard configuration
+  # layout: Keyboard layout (us, uk, de, fr, etc.)
+  # variant: Layout variant (leave empty for default)
   keyboard:
     layout: us
     variant: ""
     
-  # Network configuration - DHCP by default
+  # Network configuration using Netplan format
+  # This configuration applies during and after installation
   network:
     version: 2
     ethernets:
-      enp0s5:  # Parallels default interface name on ARM64
-        dhcp4: true
-        dhcp6: false
+      # Parallels default interface name
+      # ARM64 Macs: typically enp0s5
+      # Intel Macs: might be enp0s5 or eth0
+      enp0s5:
+        dhcp4: true    # Use DHCP for IPv4 (recommended for Parallels NAT)
+        dhcp6: false   # Disable IPv6 DHCP (not needed in most cases)
         
-  # Storage configuration - use entire disk
+  # Storage configuration
+  # Defines how Ubuntu will partition and use the disk
   storage:
     layout:
+      # Storage layout options:
+      # - direct: Use entire disk with root partition (no LVM)
+      # - lvm: Use LVM for flexibility (allows resizing)
+      # - zfs: Use ZFS (advanced, requires more RAM)
       name: direct
-      match:
-        size: largest
       
-  # Identity configuration - will be overridden by cloud-init
+      # Disk selection criteria
+      match:
+        # Select disk by:
+        # - size: largest, smallest, or specific size
+        # - name: specific device like /dev/sda
+        size: largest  # Use the largest available disk
+      
+  # Identity configuration
+  # Defines the default user account and system identity
+  # Note: These values are temporary and will be customized by cloud-init
   identity:
-    hostname: ubuntu-temp
-    username: ubuntu
-    # Password is 'ubuntu' - will be disabled after cloud-init runs
+    hostname: ubuntu-temp          # Temporary hostname (cloud-init will override)
+    username: ubuntu               # Default username (keep as ubuntu for compatibility)
+    # Password hash for 'ubuntu' (SHA-512)
+    # Generated with: mkpasswd -m sha-512 ubuntu
+    # This is only used if no SSH keys are provided
     password: "$6$rounds=4096$8dkK1P/oE$2DGKKt0wLlTVJ7USY.0jN9du8FetmEr51yjPyeiR.zKE3DGFcitNL/nF1l62BLJNR87lQZixObuXYny.Mf17K1"
     
   # SSH configuration
+  # Configures OpenSSH server for remote access
   ssh:
-    install-server: true
-    allow-pw: false  # Disable password auth after keys are installed
+    install-server: true       # Install OpenSSH server
+    allow-pw: false           # Disable password authentication
+                              # Only SSH keys will work (more secure)
     
   # Package selection
+  # Additional packages to install during OS installation
+  # Keep minimal for faster installation and smaller template size
   packages:
-    - qemu-guest-agent
-    - cloud-init
-    - python3
-    - curl
-    - wget
-    - vim
-    - net-tools
+    - qemu-guest-agent        # Enables host-guest communication in Parallels
+    - cloud-init              # Enables post-boot configuration
+    - python3                 # Required by cloud-init and automation
+    - curl                    # Common tool for downloading files
+    - wget                    # Alternative download tool
+    - vim                     # Text editor for maintenance
+    - net-tools               # Legacy network tools (ifconfig, netstat)
     
-  # Disable apt updates during install for speed
+  # Update policy during installation
+  # Options: security (security only), all (all updates), none (no updates)
+  # 'security' is a good balance between speed and security
   updates: security
   
-  # Late commands - prepare for cloud-init
+  # Late commands - executed after installation, before reboot
+  # These commands run in the installed system context (/target)
   late-commands:
-    # Ensure cloud-init is enabled
+    # Enable cloud-init services for first boot
+    # These services handle post-boot configuration:
+    # - cloud-init-local: Early boot, no network
+    # - cloud-init: Network available, main config
+    # - cloud-config: Module configuration
+    # - cloud-final: Final scripts and cleanup
     - curtin in-target --target=/target -- systemctl enable cloud-init
     - curtin in-target --target=/target -- systemctl enable cloud-init-local
     - curtin in-target --target=/target -- systemctl enable cloud-config
     - curtin in-target --target=/target -- systemctl enable cloud-final
-    # Clean cloud-init to ensure it runs on first boot
+    
+    # Clean cloud-init state to ensure fresh run on first boot
+    # This allows cloud-init to reconfigure the system
     - curtin in-target --target=/target -- cloud-init clean
-    # Remove default user if exists (cloud-init will recreate)
+    
+    # Remove the default user created during installation
+    # Cloud-init will recreate with proper SSH keys and settings
+    # The '|| true' prevents failure if user doesn't exist
     - curtin in-target --target=/target -- deluser --remove-home ubuntu || true
-    # Ensure guest tools are enabled for Parallels
+    
+    # Enable Parallels guest agent for better integration
+    # Provides clipboard sharing, time sync, and graceful shutdown
     - curtin in-target --target=/target -- systemctl enable qemu-guest-agent
     
-  # User data for first boot cloud-init
+  # User data for first boot cloud-init configuration
+  # This section is processed by cloud-init after installation
+  # It can be overridden/merged with external cloud-init data
   user-data:
+    # Security: disable root login for SSH
     disable_root: true
-    package_update: true
-    package_upgrade: false
     
+    # Package management on first boot
+    package_update: true      # Update package lists
+    package_upgrade: false    # Don't upgrade packages (faster boot)
+    
+    # User account configuration
     # This will be merged with data from OpenTofu/Parallels
     users:
       - name: ubuntu
+        # System groups for various permissions:
+        # - sudo: Administrative access
+        # - adm: Read system logs
+        # - lxd: Container management
+        # - netdev: Network device control
+        # - plugdev: Removable device access
         groups: [adm, audio, cdrom, dialout, dip, floppy, lxd, netdev, plugdev, sudo, video]
+        # Grant full sudo access without password prompt
         sudo: ["ALL=(ALL) NOPASSWD:ALL"]
         shell: /bin/bash
+        # Lock password - only SSH key auth allowed
         lock_passwd: true
-        # SSH keys will be injected by OpenTofu
+        # SSH keys will be injected by OpenTofu/build script
+        # Empty array here acts as placeholder
         ssh_authorized_keys: []
-        
-    # Enable password authentication temporarily for initial setup
+    
+    # SSH configuration
+    # Disable password authentication for security
+    # Only SSH keys will be accepted
     ssh_pwauth: false
     
-    # Timezone
+    # System timezone
+    # UTC is recommended for servers to avoid DST issues
+    # Can be overridden by cloud-init user-data
     timezone: UTC
     
-    # Final message
+    # Message displayed on console after cloud-init completes
+    # $UPTIME is replaced with actual boot time
     final_message: "Ubuntu installation completed in $UPTIME seconds"

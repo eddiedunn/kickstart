@@ -1,86 +1,115 @@
-# Ubuntu Kickstart Automation
+# Ubuntu VM Automation Hub
 
-A comprehensive repository for automating Ubuntu system deployments using Kickstart technology. This project provides documentation, tools, and best practices for creating reproducible, secure, and scalable Ubuntu installations.
+**Deploy Ubuntu VMs in seconds, not minutes!** This repository provides battle-tested VM templates and automation tools for Parallels Desktop. Perfect for development environments, testing, and proof-of-concepts.
+
+## 🚀 Quick Start - Deploy VMs in Under 5 Minutes
+
+**Most users want this:** Deploy VMs from pre-built templates in seconds.
+
+```bash
+# 1. Clone this repo
+git clone https://github.com/eddiedunn/kickstart.git && cd kickstart
+
+# 2. Deploy VMs (uses template method by default)
+cd opentofu
+cp terraform.tfvars.template-example terraform.tfvars
+# Add your SSH key to terraform.tfvars
+tofu init && tofu apply
+```
+
+**That's it!** You now have multiple VMs running. See [Template Quick Start](docs/TEMPLATE-QUICKSTART.md) for the complete 5-minute guide.
 
 ## Overview
 
-### What is Kickstart?
+### Why Use Templates?
 
-Kickstart is an automated installation method originally developed by Red Hat that allows system administrators to create standardized, reproducible system installations. While Ubuntu traditionally uses Preseed for automation, modern Ubuntu releases (20.04+) support Kickstart via the Subiquity installer, providing a more familiar syntax for those coming from RHEL/CentOS environments.
+- **⚡ Lightning Fast**: Deploy VMs in seconds instead of 15-20 minutes
+- **💾 Space Efficient**: Linked clones use 90% less disk space  
+- **🔄 Consistent**: Every VM starts from the same validated base
+- **🛠️ Pre-configured**: Common tools already installed and configured
 
-### Why Use Kickstart for Ubuntu?
+### Deployment Methods Available
 
-- **Consistency**: Ensure every Ubuntu deployment follows the same configuration standards
-- **Speed**: Deploy hundreds of systems simultaneously without manual intervention
-- **Compliance**: Enforce security policies and configurations from the first boot
-- **Version Control**: Track infrastructure changes through Git
-- **Integration**: Works seamlessly with cloud-init for cloud deployments
-- **Reduced Errors**: Eliminate manual configuration mistakes
+1. **Template-based Cloning** (Recommended) - Deploy VMs in seconds from pre-configured templates
+2. **ISO-based Autoinstall** (Advanced) - Build VMs from scratch when you need fresh installs
+3. **Cloud-Init Integration** - Customize VMs on first boot (works with both methods)
 
-### How This Repository Helps
+### Perfect For
 
-This repository provides:
+- **Development Teams**: Spin up consistent dev environments instantly
+- **Testing & QA**: Deploy test environments in seconds, destroy when done
+- **POCs & Demos**: Quickly create multi-VM environments for demonstrations
+- **Learning**: Practice Kubernetes, distributed systems, etc. with real VMs
+- **CI/CD**: Automated VM provisioning for testing pipelines
 
-1. **Ready-to-use Templates**: Production-tested Kickstart configurations for common Ubuntu deployment scenarios
-2. **Validation Tools**: Scripts to verify Kickstart syntax before deployment
-3. **Generator Scripts**: Automated tools to create customized Kickstart files
-4. **Best Practices**: Industry-proven patterns for secure, maintainable deployments
-5. **CI/CD Integration**: Pipeline examples for automated testing and deployment
+### Key Features
+
+- **Multi-Architecture Support**: Optimized for ARM64 (Apple Silicon) and AMD64
+- **Parallels Desktop Integration**: Native support for macOS virtualization
+- **OpenTofu/Terraform**: Declarative VM management
+- **Automated ISO Building**: Create custom Ubuntu ISOs with autoinstall
+- **Template Management**: Tools for creating and managing VM templates
+- **Cloud-Init Support**: Dynamic VM customization
 
 ## Repository Structure
 
 ```
 kickstart/
 ├── README.md                     # This file
-├── GETTING_STARTED.md           # Beginner's guide
-├── BEST_PRACTICES.md            # Production recommendations
-├── UBUNTU_KICKSTART_REFERENCE.md # Technical reference
-├── AUTOMATION_TOOLS.md          # Tool documentation
-├── templates/                   # Kickstart file templates
-│   ├── minimal/                 # Minimal installation configs
-│   ├── desktop/                 # Ubuntu Desktop configs
-│   ├── server/                  # Ubuntu Server configs
-│   └── cloud/                   # Cloud-optimized configs
+├── CLAUDE.md                    # AI assistant guidance
+├── docs/                        # Documentation
+│   ├── TEMPLATE-QUICKSTART.md   # ⭐ START HERE - 5-minute guide
+│   ├── TEMPLATE-MAINTENANCE.md  # Keep templates updated
+│   ├── VM-TEMPLATE-GUIDE.md     # Advanced template management
+│   ├── ISO-QUICKSTART.md        # ISO-based deployment (advanced)
+│   └── *.md                     # Additional guides
+├── opentofu/                    # Infrastructure as Code
+│   ├── main.tf                  # ISO-based deployments
+│   ├── main-templates.tf        # Template-based deployments
+│   ├── modules/                 # Reusable modules
+│   ├── cloud-init-examples/     # Cloud-init templates
+│   └── terraform.tfvars.*       # Example configurations
 ├── scripts/                     # Automation scripts
-│   ├── validate/                # Validation tools
-│   ├── generate/                # Generator scripts
-│   └── test/                    # Testing utilities
-├── examples/                    # Example configurations
-│   ├── development/             # Dev environment configs
-│   ├── staging/                 # Staging configs
-│   └── production/              # Production configs
-└── tests/                       # Test suites
-    ├── unit/                    # Unit tests
-    └── integration/             # Integration tests
+│   ├── build-autoinstall-iso.sh # ISO builder
+│   ├── create-parallels-template.sh # Template creator
+│   ├── manage-templates.sh      # Template management
+│   ├── prepare-vm-template.sh   # VM preparation
+│   └── deploy-vm.sh            # Deployment helper
+├── configs/                     # Kickstart/Autoinstall configs
+│   ├── ubuntu-22.04-handsfree.yaml # Autoinstall config
+│   └── cloud-init-template.yaml # Cloud-init template
+├── autoinstall/                 # Autoinstall files
+│   ├── user-data               # Ubuntu autoinstall config
+│   └── meta-data               # Instance metadata
+└── output/                      # Generated ISOs
 ```
 
-## Quick Start
+## Getting Started
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/eddiedunn/kickstart.git
-   cd kickstart
-   ```
+### 🎯 For Most Users: Template-Based Deployment
 
-2. **Choose a template**:
-   ```bash
-   cp templates/server/ubuntu-22.04-lts.cfg my-server.cfg
-   ```
+**Deploy VMs in seconds using pre-built templates:**
 
-3. **Customize your configuration**:
-   ```bash
-   vim my-server.cfg
-   ```
+1. **[Template Quick Start](docs/TEMPLATE-QUICKSTART.md)** - 5-minute guide to deploying VMs
+2. **[Template Maintenance](docs/TEMPLATE-MAINTENANCE.md)** - Keep templates updated with patches
+3. **[Advanced Template Guide](docs/VM-TEMPLATE-GUIDE.md)** - Create custom templates
 
-4. **Validate your Kickstart file**:
-   ```bash
-   ./scripts/validate/validate-kickstart.sh my-server.cfg
-   ```
+### 🔧 For Advanced Users: ISO-Based Deployment
 
-5. **Generate ISO or PXE configuration**:
-   ```bash
-   ./scripts/generate/create-boot-media.sh my-server.cfg
-   ```
+**Build VMs from scratch when you need:**
+- Fresh installs with latest Ubuntu version
+- Custom partition layouts
+- Compliance-specific configurations
+- CI/CD pipeline integration
+
+See [ISO Quick Start](docs/ISO-QUICKSTART.md) for instructions.
+
+### 📊 Comparison
+
+| Method | Deploy Time | Use Case | Difficulty |
+|--------|------------|----------|------------|
+| **Templates** | < 1 minute | Development, Testing, POCs | Easy |
+| **ISO** | 15-20 minutes | Production, Fresh Installs | Advanced |
 
 ## Supported Ubuntu Versions
 
@@ -98,10 +127,46 @@ kickstart/
 
 ## Documentation
 
-- [Getting Started Guide](GETTING_STARTED.md) - Step-by-step tutorial for beginners
-- [Best Practices](BEST_PRACTICES.md) - Production deployment recommendations
-- [Technical Reference](UBUNTU_KICKSTART_REFERENCE.md) - Detailed directive documentation
-- [Automation Tools](AUTOMATION_TOOLS.md) - Script and tool usage guide
+### 🚀 Start Here
+- **[Template Quick Start](docs/TEMPLATE-QUICKSTART.md)** - Deploy VMs in 5 minutes
+- **[ISO Quick Start](docs/ISO-QUICKSTART.md)** - Build VMs from scratch
+
+### 📚 Comprehensive Guides
+
+**Deployment & Configuration**
+- [Deployment Methods](docs/deployment-methods.md) - All deployment options compared
+- [Template Guide](docs/VM-TEMPLATE-GUIDE.md) - Create and manage VM templates
+- [Template Maintenance](docs/TEMPLATE-MAINTENANCE.md) - Keep templates updated
+
+**Reference & Troubleshooting**
+- [Technical Reference](docs/technical-reference.md) - In-depth technical details
+- [Troubleshooting Guide](docs/troubleshooting.md) - Common issues and solutions
+
+## Available Tools
+
+### Core Scripts
+- **build-autoinstall-iso.sh** - Build custom Ubuntu ISOs with autoinstall
+- **create-parallels-template.sh** - Create VM templates from existing VMs
+- **manage-templates.sh** - Comprehensive template management utility
+- **deploy-vm.sh** - Deploy VMs from ISOs or templates
+
+### OpenTofu/Terraform Modules
+- **parallels-vm** - Core module for VM provisioning
+- **vm-template** - Module for template-based deployments
+
+## Best Practices
+
+### Security
+- Store passwords as SHA-512 hashes, never plaintext
+- Use SSH keys for authentication
+- Enable firewall and fail2ban
+- Regular security updates via unattended-upgrades
+
+### Template Management
+- Version your templates (e.g., ubuntu-22.04-v1.2.0)
+- Document template contents and changes
+- Test templates before production use
+- Regular monthly updates for security patches
 
 ## Contributing
 

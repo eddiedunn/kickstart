@@ -1,33 +1,70 @@
-# Example configuration for deploying VMs from templates
+# terraform.tfvars.template-example - Template-based VM Deployment
+#
+# This configuration file demonstrates how to deploy VMs from pre-built
+# Parallels templates. Templates provide fast, consistent VM deployments
+# with linked clones saving significant disk space.
+#
+# Prerequisites:
+#   1. Create a template: ./scripts/manage-templates.sh create <vm-name>
+#   2. Copy this file: cp terraform.tfvars.template-example terraform.tfvars
+#   3. Edit terraform.tfvars with your template names and settings
+#   4. Deploy: tofu apply
+#
+# For ISO-based deployments, see terraform.tfvars.example instead.
 
-# Default template name (created from ubuntu-minimal-test)
+# =============================================================================
+# TEMPLATE CONFIGURATION
+# =============================================================================
+
+# Default template to use when not specified per VM
+# This template must exist in Parallels Desktop
+# List templates: prlctl list -t
 default_template_name = "ubuntu-minimal-test-template"
 
-# SSH keys to inject into VMs
+# SSH keys to inject into all VMs via cloud-init
+# These keys will be added to the ubuntu user's authorized_keys
 default_ssh_keys = [
-  # Add your SSH public keys here
+  # Add your SSH public keys here:
   # "ssh-rsa AAAAB3NzaC1yc2E... user@host",
-  # "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5... user@host"
+  # "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5... user@host",
+  # file("~/.ssh/id_ed25519.pub"),  # Read from file
 ]
 
-# Deploy VMs from templates
+# =============================================================================
+# VM DEFINITIONS FROM TEMPLATES
+# =============================================================================
+
+# Deploy multiple VMs from templates with specific configurations
+# Each VM can have custom cloud-init data for post-deployment setup
 template_vms = {
-  # Web servers
+  # Web Server 1 - Nginx with SSL support
   "web-01" = {
-    template_name = "ubuntu-minimal-test-template"
-    cpus          = 2
-    memory        = 2048
-    linked_clone  = true
-    cloud_init    = true
+    template_name = "ubuntu-minimal-test-template"  # Source template
+    cpus          = 2                               # 2 CPU cores
+    memory        = 2048                             # 2GB RAM
+    linked_clone  = true                             # Space-efficient clone
+    cloud_init    = true                             # Enable customization
+    
+    # Cloud-init configuration for web server setup
+    # This runs on first boot to configure the VM
     user_data     = <<-EOF
       #cloud-config
       hostname: web-01
+      fqdn: web-01.local
+      
+      # Install web server packages
       packages:
         - nginx
         - certbot
+        - python3-certbot-nginx
+      
+      # Configure and start services
       runcmd:
         - systemctl enable nginx
         - systemctl start nginx
+        - ufw allow 'Nginx Full'
+        - ufw allow OpenSSH
+        - ufw --force enable
     EOF
   }
   
@@ -89,15 +126,127 @@ template_vms = {
   }
 }
 
-# Example: Deploy from PVM bundle (uncomment to use)
+# =============================================================================
+# PVM BUNDLE DEPLOYMENTS
+# =============================================================================
+
+# Deploy VMs from exported PVM bundles
+# PVM bundles are portable VM packages that can be shared between hosts
+# Create PVM: ./scripts/manage-templates.sh export <template-name>
+#
 # pvm_vms = {
 #   "imported-01" = {
-#     pvm_path     = "./templates/ubuntu-template-20240130.pvm"
-#     cpus         = 2
-#     memory       = 4096
-#     cloud_init   = true
+#     pvm_path     = "./templates/ubuntu-template-20240130.pvm"  # Path to PVM file
+#     cpus         = 2                                            # Override CPU count
+#     memory       = 4096                                         # Override RAM
+#     cloud_init   = true                                         # Apply cloud-init
+#     user_data    = <<-EOF
+#       #cloud-config
+#       hostname: imported-01
+#       timezone: America/New_York
+#     EOF
 #   }
 # }
 
+# =============================================================================
+# GLOBAL SETTINGS
+# =============================================================================
+
 # Enable cloud-init for all VMs by default
+# Set to false if you want to disable cloud-init globally
 enable_cloud_init = true
+
+# =============================================================================
+# ADVANCED TEMPLATE EXAMPLES
+# =============================================================================
+
+# Example 1: Kubernetes Cluster from Templates
+# template_vms = {
+#   "k8s-master" = {
+#     template_name = "ubuntu-k8s-template"
+#     cpus         = 4
+#     memory       = 4096
+#     linked_clone = true
+#     cloud_init   = true
+#     user_data    = file("${path.module}/cloud-init/k8s-master.yaml")
+#   }
+#   
+#   "k8s-worker-1" = {
+#     template_name = "ubuntu-k8s-template"
+#     cpus         = 4
+#     memory       = 8192
+#     linked_clone = true
+#     cloud_init   = true
+#     user_data    = file("${path.module}/cloud-init/k8s-worker.yaml")
+#   }
+# }
+
+# Example 2: Development Environment
+# template_vms = {
+#   "dev-env" = {
+#     template_name = "ubuntu-dev-template"
+#     cpus         = 8
+#     memory       = 16384
+#     linked_clone = false  # Full clone for isolation
+#     cloud_init   = true
+#     user_data    = <<-EOF
+#       #cloud-config
+#       hostname: dev-workstation
+#       users:
+#         - name: developer
+#           groups: [sudo, docker]
+#           shell: /bin/bash
+#           ssh_authorized_keys:
+#             - ${file("~/.ssh/id_ed25519.pub")}
+#       packages:
+#         - build-essential
+#         - git
+#         - docker.io
+#         - docker-compose
+#         - nodejs
+#         - npm
+#       runcmd:
+#         - usermod -aG docker ubuntu
+#         - systemctl enable docker
+#     EOF
+#   }
+# }
+
+# Example 3: Minimal VMs for Testing
+# template_vms = {
+#   for i in range(1, 4) : "test-${format("%02d", i)}" => {
+#     template_name = "ubuntu-minimal-template"
+#     cpus         = 1
+#     memory       = 1024
+#     linked_clone = true
+#     cloud_init   = true
+#     user_data    = <<-EOF
+#       #cloud-config
+#       hostname: test-${format("%02d", i)}
+#     EOF
+#   }
+# }
+
+# =============================================================================
+# CLOUD-INIT TIPS
+# =============================================================================
+#
+# 1. Always start with #cloud-config
+# 2. Use proper YAML indentation (2 spaces)
+# 3. Test configurations with: cloud-init devel schema --config-file <file>
+# 4. Common cloud-init modules:
+#    - packages: Install software
+#    - runcmd: Run commands on first boot
+#    - write_files: Create configuration files
+#    - users: Add/configure users
+#    - ssh_authorized_keys: Add SSH keys
+#
+# 5. View cloud-init logs in VM:
+#    sudo journalctl -u cloud-init
+#    sudo cat /var/log/cloud-init.log
+#
+# 6. Re-run cloud-init (testing):
+#    sudo cloud-init clean
+#    sudo cloud-init init
+#    sudo cloud-init modules --mode=config
+#    sudo cloud-init modules --mode=final

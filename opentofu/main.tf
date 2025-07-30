@@ -1,13 +1,27 @@
+# main.tf - ISO-based VM Deployment Configuration
+#
+# This configuration deploys Ubuntu VMs from custom autoinstall ISOs.
+# It handles VM creation, configuration, and lifecycle management.
+# For template-based deployments, see main-templates.tf
+
 terraform {
   required_providers {
+    # Parallels Desktop provider for VM management
+    # Supports VM creation, configuration, and control
     parallels-desktop = {
       source  = "parallels/parallels-desktop"
       version = "~> 0.2.0"
     }
+    
+    # Null provider for executing local commands
+    # Used for VM operations not supported by Parallels provider
     null = {
       source  = "hashicorp/null"
       version = "~> 3.2.0"
     }
+    
+    # Random provider for generating unique identifiers
+    # Ensures VMs can be recreated without conflicts
     random = {
       source  = "hashicorp/random"
       version = "~> 3.6.0"
@@ -17,28 +31,40 @@ terraform {
 
 # Provider configuration
 provider "parallels-desktop" {
-  # Provider will use default Parallels Desktop installation
+  # Provider automatically detects Parallels Desktop installation
+  # Default location: /Applications/Parallels Desktop.app
+  # No explicit configuration needed for standard installations
 }
 
-# Local values for SSH key detection
+# Local values for SSH key detection and VM configuration
 locals {
+  # Expand home directory path for cross-platform compatibility
   home_dir = pathexpand("~")
+  
+  # SSH key detection with priority order:
+  # 1. User-specified path (if provided)
+  # 2. Ed25519 key (most secure, recommended)
+  # 3. RSA key (widely compatible)
+  # 4. ECDSA key (alternative)
+  # 5. Empty string if no keys found
   ssh_public_key = var.ssh_public_key_path != "" ? file(var.ssh_public_key_path) : (
     fileexists("${pathexpand("~")}/.ssh/id_ed25519.pub") ? file("${pathexpand("~")}/.ssh/id_ed25519.pub") :
     fileexists("${pathexpand("~")}/.ssh/id_rsa.pub") ? file("${pathexpand("~")}/.ssh/id_rsa.pub") :
     fileexists("${pathexpand("~")}/.ssh/id_ecdsa.pub") ? file("${pathexpand("~")}/.ssh/id_ecdsa.pub") : ""
   )
   
-  # Normalize VM definitions
+  # Normalize VM definitions with fallback to defaults
+  # If no VMs defined in terraform.tfvars, create a single default VM
+  # This ensures the configuration always produces at least one VM
   vms = length(var.vm_definitions) > 0 ? var.vm_definitions : {
     "default" = {
-      name        = "ubuntu-server"
-      cpus        = var.default_cpus
-      memory      = var.default_memory
-      disk_size   = var.default_disk_size
-      iso_path    = var.default_iso_path
-      network     = "shared"
-      start_after = []
+      name        = "ubuntu-server"          # VM name in Parallels
+      cpus        = var.default_cpus         # Number of CPU cores
+      memory      = var.default_memory       # RAM in MB
+      disk_size   = var.default_disk_size    # Disk in GB
+      iso_path    = var.default_iso_path     # Path to autoinstall ISO
+      network     = "shared"                 # NAT networking
+      start_after = []                       # No dependencies
     }
   }
 }
@@ -79,27 +105,28 @@ resource "null_resource" "create_vm" {
       echo "Creating VM ${each.value.name}..."
       
       # Create the VM with proper architecture detection
+      # ARM64 (Apple Silicon) and x86_64 (Intel) are both supported
       if [[ "$(uname -m)" == "arm64" ]]; then
         prlctl create "${each.value.name}" \
           --distribution ubuntu \
-          --no-hdd
+          --no-hdd  # We'll add disk separately for size control
       else
         prlctl create "${each.value.name}" \
           --distribution ubuntu \
           --no-hdd
       fi
       
-      # Configure hardware
+      # Configure VM hardware and behavior
       prlctl set "${each.value.name}" \
-        --cpus ${each.value.cpus} \
-        --memsize ${each.value.memory} \
+        --cpus ${each.value.cpus} \           # CPU cores
+        --memsize ${each.value.memory} \      # RAM in MB
         --startup-view ${var.headless ? "headless" : "window"} \
-        --on-shutdown close \
-        --time-sync on \
+        --on-shutdown close \                 # Close VM window on shutdown
+        --time-sync on \                      # Sync time with host
         --shared-clipboard ${var.headless ? "off" : "on"} \
-        --shared-cloud off \
-        --auto-compress off \
-        --videosize 32
+        --shared-cloud off \                   # Disable iCloud integration
+        --auto-compress off \                  # Better performance
+        --videosize 32                          # Video memory in MB
       
       # Add disk
       prlctl set "${each.value.name}" \
@@ -147,6 +174,7 @@ resource "null_resource" "create_vm" {
     EOT
   }
   
+  # Destroy provisioner ensures clean VM removal
   provisioner "local-exec" {
     when = destroy
     command = <<-EOT
@@ -160,11 +188,13 @@ resource "null_resource" "create_vm" {
   }
 }
 
-# Start VMs
+# Start VMs after creation
+# Separate resource ensures VM is fully configured before starting
 resource "null_resource" "start_vm" {
   for_each = local.vms
   
   triggers = {
+    # Depend on VM creation to ensure proper ordering
     vm_id = null_resource.create_vm[each.key].id
   }
   
@@ -173,10 +203,10 @@ resource "null_resource" "start_vm" {
       echo "Starting VM ${each.value.name}..."
       prlctl start "${each.value.name}"
       
-      # Give VM time to boot
+      # Give VM time to initialize
       sleep 5
       
-      # Check status
+      # Verify VM started successfully
       if prlctl list -i | grep -q "^${each.value.name}\\s"; then
         echo "VM ${each.value.name} is running"
       else
@@ -188,11 +218,13 @@ resource "null_resource" "start_vm" {
   depends_on = [null_resource.create_vm]
 }
 
-# Wait for installation to complete
+# Wait for Ubuntu autoinstall to complete
+# This resource monitors the VM until cloud-init finishes
 resource "null_resource" "wait_for_installation" {
   for_each = local.vms
   
   triggers = {
+    # Run after VM starts
     vm_id = null_resource.start_vm[each.key].id
   }
   
@@ -202,17 +234,19 @@ resource "null_resource" "wait_for_installation" {
       echo "This may take 5-10 minutes depending on your hardware."
       
       # Wait for VM to get an IP (indicates it's booted)
-      MAX_WAIT=600  # 10 minutes
+      MAX_WAIT=600  # 10 minutes timeout
       WAITED=0
       
       while [ $WAITED -lt $MAX_WAIT ]; do
-        # Try to get IP address
+        # Try to get IP address from inside the VM
+        # This regex extracts IPv4 addresses only
         IP=$(prlctl exec "${each.value.name}" "ip -4 addr show scope global" 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1 || true)
         
         if [ -n "$IP" ]; then
           echo "VM ${each.value.name} has IP address: $IP"
           
           # Check if cloud-init has finished
+          # The boot-finished file is created when cloud-init completes
           if prlctl exec "${each.value.name}" "test -f /var/lib/cloud/instance/boot-finished" 2>/dev/null; then
             echo "Installation completed for ${each.value.name}"
             break

@@ -1,206 +1,531 @@
-# VM Template Guide for OpenTofu
+# VM Template Guide
 
-This guide explains how to create and use VM templates with Parallels Desktop and OpenTofu for rapid deployment of multiple VMs.
+This comprehensive guide covers creating, managing, and deploying VM templates with Parallels Desktop and OpenTofu.
 
 ## Overview
 
-The template workflow allows you to:
-- Create a base VM once with all required software
-- Convert it to a reusable template
-- Deploy multiple VMs from the template in seconds
-- Customize each VM with cloud-init
-- Save disk space with linked clones
+VM templates provide a fast, efficient way to deploy multiple VMs with consistent configurations. This guide covers:
+- Creating templates from existing VMs
+- Managing different template types
+- Deploying VMs using OpenTofu
+- Best practices and troubleshooting
 
-## Quick Start
+## Template Types
 
-### 1. Prepare Your Base VM
+### 1. Linked Clone Templates
+**Best for:** Development environments, rapid deployment
+- **Speed:** < 1 minute deployment
+- **Space:** ~10% of original VM size
+- **Limitation:** Requires parent template to remain intact
 
-First, ensure your base VM (`ubuntu-minimal-test`) is in a good state:
+### 2. Full Clone Templates
+**Best for:** Independent VMs, production use
+- **Speed:** 2-3 minutes deployment
+- **Space:** Full VM size
+- **Benefit:** Completely independent from parent
+
+### 3. PVM Bundle Templates
+**Best for:** Template distribution, archival
+- **Speed:** 3-5 minutes deployment
+- **Space:** Compressed VM size
+- **Benefit:** Portable between hosts
+
+### 4. Snapshot Templates
+**Best for:** Version control, testing
+- **Speed:** 1-2 minutes deployment
+- **Space:** Differential storage
+- **Benefit:** Multiple restore points
+
+## Creating Templates
+
+### Step 1: Prepare Base VM
+
+First, deploy and configure a base VM:
 
 ```bash
-# Prepare the VM for templating (cleans caches, removes host keys, etc.)
-./scripts/prepare-vm-template.sh ubuntu-minimal-test
+# Option 1: Deploy from ISO
+./scripts/build-autoinstall-iso.sh ubuntu-22.04.iso
+cd opentofu && tofu apply
+
+# Option 2: Use existing VM
+# Ensure VM has all required software installed
 ```
 
-### 2. Create Template
-
-Convert the prepared VM to a template:
-
+Configure the base VM:
 ```bash
-# Create all template formats (recommended)
-./scripts/create-parallels-template.sh ubuntu-minimal-test all
+# SSH into VM
+ssh ubuntu@<vm-ip>
 
-# Or create specific format:
-./scripts/create-parallels-template.sh ubuntu-minimal-test template  # Linked clone template
-./scripts/create-parallels-template.sh ubuntu-minimal-test export    # PVM bundle
-./scripts/create-parallels-template.sh ubuntu-minimal-test snapshot  # Snapshot
+# Update and install base software
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y \
+  curl wget git vim htop \
+  build-essential python3-pip \
+  docker.io docker-compose
+
+# Configure as needed
+# Install role-specific software
+# Set up configurations
 ```
 
-### 3. Deploy VMs with OpenTofu
+### Step 2: Install Parallels Tools
 
+For optimal performance:
 ```bash
-cd opentofu
+# From Parallels Desktop menu: Actions > Install Parallels Tools
+# In VM:
+sudo mount /dev/cdrom /mnt
+sudo /mnt/install
+# Reboot when prompted
+```
 
-# Copy example configuration
-cp terraform.tfvars.template-example terraform.tfvars
+### Step 3: Prepare for Templating
 
-# Edit terraform.tfvars to:
-# - Add your SSH public keys
-# - Define the VMs you want to create
-# - Customize cloud-init for each VM
+Clean and generalize the VM:
+```bash
+# Run preparation script (from host)
+./scripts/prepare-vm-template.sh ubuntu-base
 
-# Initialize and deploy
-tofu init
-tofu apply
+# This script:
+# - Cleans package caches
+# - Removes SSH host keys
+# - Clears machine IDs
+# - Resets cloud-init
+# - Removes logs and temp files
+# - Prepares for first boot
+```
+
+### Step 4: Create Template
+
+Convert VM to template:
+```bash
+# Create all template types (recommended)
+./scripts/create-parallels-template.sh ubuntu-base all
+
+# Or create specific type:
+./scripts/create-parallels-template.sh ubuntu-base template  # Linked clone
+./scripts/create-parallels-template.sh ubuntu-base export    # PVM bundle
+./scripts/create-parallels-template.sh ubuntu-base snapshot  # Snapshot
 ```
 
 ## Template Management
 
 ### List Templates
 ```bash
-./scripts/manage-templates.sh list
+# Using management script
+./scripts/manage-templates.sh list-templates
+
+# Using Parallels CLI
+prlctl list -t
+
+# Get template details
+./scripts/manage-templates.sh info ubuntu-base-template
 ```
 
-### Get Template Info
+### Clone Templates Manually
 ```bash
-./scripts/manage-templates.sh info ubuntu-minimal-test-template
-```
+# Linked clone (fast, space-efficient)
+./scripts/manage-templates.sh clone ubuntu-base-template \
+  --name dev-vm --linked
 
-### Clone Template Manually
-```bash
-# Full clone
-./scripts/manage-templates.sh clone ubuntu-minimal-test-template --name test-vm
-
-# Linked clone (saves space)
-./scripts/manage-templates.sh clone ubuntu-minimal-test-template --name test-vm --linked
+# Full clone (independent copy)
+./scripts/manage-templates.sh clone ubuntu-base-template \
+  --name prod-vm
 ```
 
 ### Export/Import Templates
 ```bash
-# Export template as PVM
-./scripts/manage-templates.sh export ubuntu-minimal-test-template
+# Export template as PVM bundle
+./scripts/manage-templates.sh export-pvm \
+  --name ubuntu-base-template \
+  --file ubuntu-base-v1.0.pvm
 
 # Import PVM as template
-./scripts/manage-templates.sh import ./templates/ubuntu-template.pvm
+./scripts/manage-templates.sh import-pvm \
+  --file ubuntu-base-v1.0.pvm
 ```
 
-## OpenTofu Configuration
+### Update Templates
+```bash
+# 1. Clone template to working VM
+prlctl clone ubuntu-base-template --name update-vm
 
-### Basic Template Deployment
+# 2. Start and update
+prlctl start update-vm
+ssh ubuntu@<vm-ip>
+sudo apt update && sudo apt upgrade -y
+
+# 3. Re-prepare and create new version
+./scripts/prepare-vm-template.sh update-vm
+./scripts/create-parallels-template.sh update-vm template
+
+# 4. Version the template
+prlctl set update-vm-template \
+  --name ubuntu-base-template-v2
+```
+
+## OpenTofu Deployment
+
+### Basic Configuration
+
+Deploy VMs from templates using OpenTofu:
 
 ```hcl
-template_vms = {
+# terraform.tfvars
+vm_template_definitions = {
   "web-server" = {
-    template_name = "ubuntu-minimal-test-template"
-    cpus          = 2
-    memory        = 4096
-    linked_clone  = true
+    source_type  = "template"
+    source_name  = "ubuntu-base-template"
+    linked_clone = true
+    cpus         = 2
+    memory       = 4096
   }
 }
 ```
 
-### With Cloud-Init Customization
+### Advanced Configuration with Cloud-Init
 
 ```hcl
-template_vms = {
-  "database" = {
-    template_name = "ubuntu-minimal-test-template"
-    cpus          = 4
-    memory        = 8192
-    linked_clone  = true
-    cloud_init    = true
-    user_data     = <<-EOF
-      #cloud-config
-      hostname: database
-      packages:
-        - postgresql
-        - postgresql-contrib
-      runcmd:
-        - systemctl enable postgresql
-        - systemctl start postgresql
-    EOF
+vm_template_definitions = {
+  "app-server" = {
+    source_type  = "template"
+    source_name  = "ubuntu-base-template"
+    linked_clone = true
+    cpus         = 4
+    memory       = 8192
+    
+    # Cloud-init configuration
+    cloud_init = true
+    cloud_init_files = {
+      user_data = "./cloud-init/app-server.yaml"
+      meta_data = "./cloud-init/meta-data.yaml"
+    }
+    
+    # Direct cloud-init data
+    customize = {
+      hostname = "app-server-01"
+      packages = ["nginx", "postgresql"]
+      runcmd   = [
+        "systemctl enable nginx",
+        "systemctl start nginx"
+      ]
+    }
   }
 }
 ```
 
-### Deploy from PVM Bundle
+### Deploy from PVM Bundles
 
 ```hcl
-pvm_vms = {
+vm_template_definitions = {
   "imported-vm" = {
-    pvm_path = "./templates/ubuntu-template-20240130.pvm"
-    cpus     = 2
-    memory   = 4096
+    source_type = "pvm"
+    source_name = "./templates/ubuntu-base-v1.0.pvm"
+    cpus        = 2
+    memory      = 4096
+  }
+}
+```
+
+### Deploy from Snapshots
+
+```hcl
+vm_template_definitions = {
+  "test-vm" = {
+    source_type = "snapshot"
+    source_name = "baseline-config"
+    source_vm   = "ubuntu-base-template"
+  }
+}
+```
+
+## Cloud-Init Integration
+
+### Basic Cloud-Init Configuration
+
+Create `cloud-init/web-server.yaml`:
+```yaml
+#cloud-config
+hostname: web-server
+fqdn: web-server.local
+manage_etc_hosts: true
+
+users:
+  - default
+  - name: webadmin
+    groups: [sudo, www-data]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+      - ssh-rsa AAAAB3...
+
+packages:
+  - nginx
+  - certbot
+  - python3-certbot-nginx
+
+write_files:
+  - path: /etc/nginx/sites-available/default
+    content: |
+      server {
+        listen 80 default_server;
+        root /var/www/html;
+        index index.html;
+      }
+
+runcmd:
+  - systemctl enable nginx
+  - systemctl start nginx
+  - ufw allow 'Nginx Full'
+```
+
+### Dynamic Configuration
+
+Use Terraform templates for dynamic cloud-init:
+```hcl
+# In terraform.tfvars
+vm_template_definitions = {
+  for i in range(1, 4) : "web-${i}" => {
+    source_type  = "template"
+    source_name  = "ubuntu-base-template"
+    linked_clone = true
+    cloud_init   = true
+    cloud_init_files = {
+      user_data = templatefile("cloud-init/web.yaml", {
+        hostname   = "web-${i}"
+        node_id    = i
+        cluster_ip = "192.168.1.${10 + i}"
+      })
+    }
   }
 }
 ```
 
 ## Best Practices
 
-### 1. Template Preparation
-- Always run `prepare-vm-template.sh` before creating templates
-- Ensure the VM has all base software installed
-- Remove any sensitive data or credentials
-- Install cloud-init for post-deployment customization
+### 1. Template Versioning
+- Use semantic versioning: `ubuntu-base-v1.2.3`
+- Include date stamps: `ubuntu-base-20240130`
+- Document changes in changelog
 
-### 2. Storage Optimization
-- Use linked clones for local development (90% space savings)
-- Use PVM bundles for sharing templates between hosts
-- Regular templates for production deployments
+### 2. Template Maintenance
+- Update monthly for security patches
+- Test updates before production use
+- Keep previous version until new one is proven
+- Automate update process where possible
 
-### 3. Cloud-Init Usage
-- Keep user-data simple and focused
-- Use for hostname, SSH keys, and initial packages
-- Avoid complex configurations (use configuration management instead)
+### 3. Security Considerations
+- Never include:
+  - Private SSH keys
+  - Passwords or secrets
+  - Production certificates
+  - Customer data
+- Always regenerate on first boot:
+  - SSH host keys
+  - Machine IDs
+  - Network MAC addresses
 
-### 4. Version Control
-- Create snapshots before major template updates
-- Export PVM bundles for archival
-- Document template contents and versions
+### 4. Storage Optimization
+- Use linked clones for development
+- Regular templates for production
+- PVM bundles for archival
+- Clean up old templates regularly
 
-## Troubleshooting
+### 5. Documentation
+- Document what's installed in each template
+- List any manual configuration steps
+- Note any known issues or limitations
+- Include contact information for support
 
-### VM Won't Start
-- Check if template exists: `prlctl list -a -t`
-- Verify linked clone base is available
-- Check disk space for full clones
+## Pre-Template Checklist
 
-### Cloud-Init Not Working
-- Ensure cloud-init is installed in the template
-- Check if cloud-init ISO is attached: `prlctl list -i <vm-name>`
-- Review cloud-init logs: `prlctl exec <vm-name> 'sudo cat /var/log/cloud-init.log'`
+Before creating a template, ensure the VM is properly generalized:
 
-### IP Address Not Showing
-- Wait for VM to fully boot (cloud-init can take 1-2 minutes)
-- Check network configuration in Parallels
-- Ensure QEMU guest agent is installed and running
+- [ ] Package manager cache cleared (`apt-get clean`)
+- [ ] SSH host keys removed (`/etc/ssh/ssh_host_*`)
+- [ ] Machine ID cleared (`/etc/machine-id`)
+- [ ] Cloud-init data cleaned (`cloud-init clean`)
+- [ ] Network configs reset
+- [ ] Logs cleared
+- [ ] Temporary files removed
+- [ ] User history cleared
+- [ ] Free space zeroed (optional, for compression)
 
-## Example POC Deployment
+## Use Case Examples
 
-For a typical proof-of-concept with web servers, database, and app servers:
+### Development Environment
+```hcl
+# Deploy 5 developer workstations
+vm_template_definitions = {
+  for i in range(1, 6) : "dev-${i}" => {
+    source_type  = "template"
+    source_name  = "ubuntu-dev-template"
+    linked_clone = true  # Save space
+    cpus         = 4
+    memory       = 8192
+    cloud_init_files = {
+      user_data = templatefile("cloud-init/dev.yaml", {
+        developer_id = i
+        username     = "developer${i}"
+      })
+    }
+  }
+}
+```
 
+### Web Application Stack
+```hcl
+# Deploy complete application environment
+vm_template_definitions = {
+  # Load balancer
+  "lb" = {
+    source_type = "template"
+    source_name = "ubuntu-base-template"
+    cpus        = 2
+    memory      = 2048
+    cloud_init_files = {
+      user_data = "./cloud-init/haproxy.yaml"
+    }
+  }
+  
+  # Web servers
+  for i in range(1, 4) : "web-${i}" => {
+    source_type  = "template"
+    source_name  = "ubuntu-base-template"
+    linked_clone = true
+    cpus         = 2
+    memory       = 4096
+    cloud_init_files = {
+      user_data = "./cloud-init/nginx.yaml"
+    }
+  }
+  
+  # Database
+  "db-primary" = {
+    source_type = "template"
+    source_name = "ubuntu-base-template"
+    cpus        = 4
+    memory      = 8192
+    cloud_init_files = {
+      user_data = "./cloud-init/postgresql.yaml"
+    }
+  }
+}
+```
+
+### POC Deployment
 ```hcl
 template_vms = {
   # Load balanced web servers
-  "web-01" = { template_name = "ubuntu-minimal-test-template", cpus = 2, memory = 2048 }
-  "web-02" = { template_name = "ubuntu-minimal-test-template", cpus = 2, memory = 2048 }
-  "web-03" = { template_name = "ubuntu-minimal-test-template", cpus = 2, memory = 2048 }
+  "web-01" = { template_name = "ubuntu-base", cpus = 2, memory = 2048 }
+  "web-02" = { template_name = "ubuntu-base", cpus = 2, memory = 2048 }
+  "web-03" = { template_name = "ubuntu-base", cpus = 2, memory = 2048 }
   
   # Database cluster
-  "db-primary"   = { template_name = "ubuntu-minimal-test-template", cpus = 4, memory = 8192 }
-  "db-secondary" = { template_name = "ubuntu-minimal-test-template", cpus = 4, memory = 8192 }
+  "db-primary"   = { template_name = "ubuntu-base", cpus = 4, memory = 8192 }
+  "db-secondary" = { template_name = "ubuntu-base", cpus = 4, memory = 8192 }
   
   # Application servers
-  "app-01" = { template_name = "ubuntu-minimal-test-template", cpus = 2, memory = 4096 }
-  "app-02" = { template_name = "ubuntu-minimal-test-template", cpus = 2, memory = 4096 }
+  "app-01" = { template_name = "ubuntu-base", cpus = 2, memory = 4096 }
+  "app-02" = { template_name = "ubuntu-base", cpus = 2, memory = 4096 }
   
   # Support services
-  "cache"    = { template_name = "ubuntu-minimal-test-template", cpus = 2, memory = 4096 }
-  "monitor"  = { template_name = "ubuntu-minimal-test-template", cpus = 1, memory = 2048 }
+  "cache"    = { template_name = "ubuntu-base", cpus = 2, memory = 4096 }
+  "monitor"  = { template_name = "ubuntu-base", cpus = 1, memory = 2048 }
 }
 ```
 
 This creates 9 VMs in minutes, all from a single template!
+
+## Troubleshooting
+
+### Template Issues
+
+**Template won't create:**
+- Ensure VM is stopped: `prlctl stop <vm-name>`
+- Check disk space: `df -h ~/Parallels`
+- Verify permissions on VM files
+
+**Clone fails:**
+- Check template exists: `prlctl list -t`
+- For linked clones, ensure parent hasn't moved
+- Try full clone if linked fails
+
+**Cloud-init not working:**
+- Verify cloud-init was cleaned in template
+- Check cloud-init ISO is attached
+- Review logs: `cloud-init status --long`
+
+### Performance Issues
+
+**Slow cloning:**
+- Use SSDs for VM storage
+- Enable linked clones
+- Check host resource usage
+- Close unnecessary applications
+
+**High disk usage:**
+- Use linked clones for development
+- Regularly clean old templates
+- Compress PVM bundles for storage
+
+### Network Issues
+
+**No IP address:**
+- Wait for cloud-init to complete
+- Check Parallels network settings
+- Verify DHCP is enabled
+- Try manual network restart
+
+## Automation Examples
+
+### Automated Template Updates
+```bash
+#!/bin/bash
+# scripts/update-template.sh
+
+TEMPLATE="ubuntu-base-template"
+UPDATE_VM="update-$$"
+
+# Clone template
+prlctl clone "$TEMPLATE" --name "$UPDATE_VM"
+
+# Start and update
+prlctl start "$UPDATE_VM"
+sleep 30
+
+# Get IP and update
+IP=$(prlctl list -f | grep "$UPDATE_VM" | awk '{print $3}')
+ssh ubuntu@"$IP" "sudo apt update && sudo apt upgrade -y"
+
+# Shutdown and prepare
+prlctl stop "$UPDATE_VM"
+./scripts/prepare-vm-template.sh "$UPDATE_VM"
+
+# Create new version
+DATE=$(date +%Y%m%d)
+./scripts/create-parallels-template.sh "$UPDATE_VM" template
+prlctl set "${UPDATE_VM}-template" --name "${TEMPLATE}-${DATE}"
+
+# Cleanup
+prlctl delete "$UPDATE_VM"
+```
+
+### Bulk VM Deployment
+```bash
+#!/bin/bash
+# Deploy multiple VMs from template
+
+TEMPLATE="ubuntu-base-template"
+COUNT=10
+
+for i in $(seq 1 $COUNT); do
+  prlctl clone "$TEMPLATE" \
+    --name "vm-${i}" \
+    --linked \
+    --changesid
+done
+```
 
 ## Clean Up
 
@@ -211,5 +536,12 @@ tofu destroy
 
 To remove a template:
 ```bash
-./scripts/manage-templates.sh delete ubuntu-minimal-test-template
+./scripts/manage-templates.sh delete ubuntu-base-template
 ```
+
+## Next Steps
+
+- Review [Deployment Methods](deployment-methods.md) for comprehensive options
+- Check [Template Maintenance](TEMPLATE-MAINTENANCE.md) for update procedures
+- See [Troubleshooting](troubleshooting.md) for detailed problem resolution
+- Explore [Cloud-Init Examples](../opentofu/cloud-init-examples/) for configurations
