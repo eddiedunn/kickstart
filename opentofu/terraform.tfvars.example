@@ -1,16 +1,53 @@
-# Example OpenTofu variables for Parallels VM
+# OpenTofu variables for Ubuntu autoinstall deployment
+# Copy this file to terraform.tfvars and customize
 
-# VM naming
-vm_name     = "ubuntu-prod-01"
-vm_hostname = "ubuntu-prod-01"
+# Single VM deployment (simple mode)
+# Uncomment and customize these if you want a single VM:
+# default_cpus      = 2
+# default_memory    = 4096  # MB
+# default_disk_size = 30    # GB
+# default_iso_path  = "../output/ubuntu-24.04-arm64-autoinstall-20250729-123456.iso"
 
-# SSH public key (replace with your actual public key)
-ssh_public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQ... user@example.com"
+# Multi-VM deployment (stack mode)
+# Define multiple VMs for your development stack:
+vm_definitions = {
+  "web" = {
+    name        = "ubuntu-web"
+    cpus        = 2
+    memory      = 2048
+    disk_size   = 20
+    iso_path    = "../output/ubuntu-24.04-arm64-autoinstall-20250729-123456.iso"
+    network     = "shared"
+    start_after = []
+  },
+  "db" = {
+    name        = "ubuntu-db"
+    cpus        = 4
+    memory      = 4096
+    disk_size   = 50
+    iso_path    = "../output/ubuntu-24.04-arm64-autoinstall-20250729-123456.iso"
+    network     = "shared"
+    start_after = []
+  },
+  "cache" = {
+    name        = "ubuntu-cache"
+    cpus        = 2
+    memory      = 2048
+    disk_size   = 20
+    iso_path    = "../output/ubuntu-24.04-arm64-autoinstall-20250729-123456.iso"
+    network     = "shared"
+    start_after = ["db"]  # Start after db VM
+  }
+}
 
-# Hardware specs
-vm_cpus     = 4
-vm_memory   = 4096  # 4GB RAM
-vm_disk_size = 50   # 50GB disk
+# SSH Configuration
+# Leave empty to auto-detect from ~/.ssh/
+# Or specify a path: ssh_public_key_path = "/Users/username/.ssh/id_ed25519.pub"
+ssh_public_key_path = ""
 
-# Path to custom ISO (relative to opentofu directory)
-custom_iso_path = "../output/ubuntu-22.04.5-autoinstall-arm64.iso"
+# VM Display Settings
+headless = true  # Set to false if you want to see VM console windows
+
+# Advanced Settings
+enable_nested_virt = true
+time_zone          = "UTC"

@@ -1,0 +1,114 @@
+#cloud-config
+autoinstall:
+  version: 1
+  
+  # Completely disable all interactive sections
+  interactive-sections: []
+  
+  # Refresh installer to get latest version
+  refresh-installer:
+    update: false
+  
+  # Locale and keyboard
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+    variant: ""
+    toggle: null
+  
+  # Network configuration - DHCP on first interface
+  network:
+    version: 2
+    ethernets:
+      enp0s5:  # Parallels default for ARM64
+        dhcp4: true
+        dhcp6: false
+        optional: true
+      en0:     # Alternative interface name
+        dhcp4: true
+        dhcp6: false
+        optional: true
+  
+  # Storage - use entire disk with LVM
+  storage:
+    layout:
+      name: lvm
+      sizing-policy: all
+      encryption:
+        passphrase: ""
+  
+  # Identity - temporary, will be replaced by cloud-init
+  identity:
+    hostname: ubuntu-server
+    username: installer
+    # Password is 'temp123' - will be removed
+    password: "$6$rounds=4096$J86aZz0Q$To16RGzWJku0swXDqweacGtL.5wCAB30TqV8rXp6tRP2J2yExpRXFBPLN6FuBM5/RdcXTmPDjKuChVIQo21Oe/"
+  
+  # SSH configuration
+  ssh:
+    install-server: true
+    allow-pw: false
+    authorized-keys: []
+  
+  # Package selection - minimal for speed
+  packages:
+    - qemu-guest-agent
+    - cloud-init
+    - openssh-server
+  
+  # Skip updates during install for speed
+  updates: security
+  
+  # Proxy - none
+  proxy: ""
+  
+  # APT configuration
+  apt:
+    primary:
+      - arches: [default]
+        uri: http://ports.ubuntu.com/ubuntu-ports
+    geoip: false
+    preserve_sources_list: false
+  
+  # User data section - runs on first boot
+  user-data:
+    disable_root: true
+    package_update: true
+    package_upgrade: false
+    
+    # Remove the installer user
+    users: []
+    
+    # This ensures the installer user is removed
+    runcmd:
+      - userdel -r installer || true
+      - rm -rf /home/installer || true
+      - echo "Autoinstall complete, ready for cloud-init" > /etc/motd
+  
+  # Late commands - prepare system for cloud-init
+  late-commands:
+    # Remove the installer user
+    - curtin in-target --target=/target -- userdel -r installer || true
+    
+    # Ensure cloud-init is enabled and will run on next boot
+    - curtin in-target --target=/target -- systemctl enable cloud-init-local.service
+    - curtin in-target --target=/target -- systemctl enable cloud-init.service
+    - curtin in-target --target=/target -- systemctl enable cloud-config.service
+    - curtin in-target --target=/target -- systemctl enable cloud-final.service
+    
+    # Clean cloud-init state
+    - curtin in-target --target=/target -- cloud-init clean --logs
+    - curtin in-target --target=/target -- rm -rf /var/lib/cloud/instances/*
+    
+    # Create marker for cloud-init
+    - curtin in-target --target=/target -- touch /etc/cloud/cloud-init.disabled
+    - curtin in-target --target=/target -- rm /etc/cloud/cloud-init.disabled
+    
+    # Enable guest agent
+    - curtin in-target --target=/target -- systemctl enable qemu-guest-agent || true
+    
+    # Create a flag file to indicate successful autoinstall
+    - curtin in-target --target=/target -- touch /var/lib/autoinstall-complete
+  
+  # Shutdown after install
+  shutdown: reboot
