@@ -482,10 +482,9 @@ This creates 9 VMs in minutes, all from a single template!
 ### Automated Template Updates
 ```bash
 #!/bin/bash
-# scripts/update-template.sh
+# Using manage-templates.sh update command
 
 TEMPLATE="ubuntu-base-template"
-UPDATE_VM="update-$$"
 
 # Clone template
 prlctl clone "$TEMPLATE" --name "$UPDATE_VM"

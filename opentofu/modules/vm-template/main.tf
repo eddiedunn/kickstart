@@ -33,6 +33,7 @@ resource "null_resource" "cloud_init_iso" {
     vm_name = var.vm_name
     user_data = var.user_data
     meta_data = var.meta_data
+    iso_path = local.cloud_init_iso
   }
   
   provisioner "local-exec" {
@@ -67,7 +68,7 @@ resource "null_resource" "cloud_init_iso" {
   
   provisioner "local-exec" {
     when = destroy
-    command = "rm -f '${local.cloud_init_iso}'"
+    command = "rm -f '${self.triggers.iso_path}'"
   }
 }
 

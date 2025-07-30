@@ -43,6 +43,7 @@ build/
 .terraform.lock.hcl
 *.tfvars
 !terraform.tfvars.example
+!terraform.tfvars.template-example
 crash.log
 crash.*.log
 override.tf
