@@ -1,0 +1,67 @@
+#cloud-config
+# Example cloud-init user-data for web server
+
+hostname: web-server
+manage_etc_hosts: true
+
+users:
+  - default
+  - name: ubuntu
+    groups: [adm, audio, cdrom, dialout, dip, floppy, lxd, netdev, plugdev, sudo, video]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: false
+
+# Update and install packages
+package_update: true
+package_upgrade: true
+packages:
+  - nginx
+  - certbot
+  - python3-certbot-nginx
+  - ufw
+  - htop
+  - curl
+  - git
+
+# Configure firewall
+runcmd:
+  # Configure UFW
+  - ufw allow 22/tcp
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw --force enable
+  
+  # Start and enable nginx
+  - systemctl enable nginx
+  - systemctl start nginx
+  
+  # Create default web content
+  - |
+    cat > /var/www/html/index.html <<EOF
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Welcome to Web Server</title>
+    </head>
+    <body>
+        <h1>Web Server Instance</h1>
+        <p>Hostname: $(hostname)</p>
+        <p>IP: $(hostname -I | awk '{print $1}')</p>
+        <p>Deployed via OpenTofu + Cloud-Init</p>
+    </body>
+    </html>
+    EOF
+  
+  # Log deployment info
+  - echo "Web server deployment completed at $(date)" >> /var/log/cloud-init-deployment.log
+
+# Write deployment marker
+write_files:
+  - path: /etc/deployment-info
+    content: |
+      DEPLOYMENT_TYPE=web-server
+      DEPLOYMENT_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+      DEPLOYMENT_METHOD=opentofu-template
+
+final_message: "Web server deployment completed at $TIMESTAMP"

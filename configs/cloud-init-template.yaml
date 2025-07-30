@@ -1,0 +1,102 @@
+#cloud-config
+# Cloud-init configuration for VMs cloned from Parallels templates
+# This runs on first boot after cloning to customize the new VM
+
+# Set hostname dynamically (can be overridden by OpenTofu)
+hostname: ${hostname}
+fqdn: ${hostname}.${domain}
+manage_etc_hosts: true
+
+# Regenerate SSH host keys on first boot
+ssh_deletekeys: true
+ssh_genkeytypes: ['rsa', 'ecdsa', 'ed25519']
+
+# Configure default user
+users:
+  - name: ubuntu
+    groups: [adm, audio, cdrom, dialout, dip, floppy, lxd, netdev, plugdev, sudo, video]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+# Update package database and upgrade packages
+package_update: true
+package_upgrade: true
+
+# Install additional packages
+packages:
+  - qemu-guest-agent
+  - cloud-init
+  - cloud-utils
+  - openssh-server
+  - python3-pip
+  - jq
+  - curl
+  - wget
+  - htop
+  - net-tools
+
+# Configure timezone
+timezone: ${timezone}
+
+# Network configuration (if needed)
+# network:
+#   version: 2
+#   ethernets:
+#     enp0s5:
+#       dhcp4: true
+#       dhcp6: false
+
+# Run commands on first boot
+runcmd:
+  # Regenerate machine ID
+  - rm -f /etc/machine-id /var/lib/dbus/machine-id
+  - systemd-machine-id-setup
+  - ln -s /etc/machine-id /var/lib/dbus/machine-id
+  
+  # Clean up template artifacts
+  - rm -f /etc/cloud/cloud-init.disabled
+  
+  # Configure Parallels Tools if present
+  - |
+    if [ -x /usr/bin/prlctl ]; then
+      systemctl enable prl-tools-service
+      systemctl start prl-tools-service
+    fi
+  
+  # Set custom MOTD
+  - |
+    cat > /etc/motd << EOF
+    ===================================================
+    VM: ${hostname}
+    Deployed from Parallels Template
+    Date: $(date)
+    ===================================================
+    EOF
+  
+  # Log successful deployment
+  - logger "VM ${hostname} successfully deployed from template"
+
+# Write deployment metadata
+write_files:
+  - path: /etc/deployment-info.json
+    content: |
+      {
+        "hostname": "${hostname}",
+        "template": "${template_name}",
+        "deployed": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+        "provider": "parallels-desktop",
+        "orchestrator": "opentofu"
+      }
+    permissions: '0644'
+
+# Final message
+final_message: "VM ${hostname} deployment complete after $UPTIME seconds"
+
+# Power state change settings
+power_state:
+  mode: reboot
+  message: "Rebooting after cloud-init completion"
+  condition: True

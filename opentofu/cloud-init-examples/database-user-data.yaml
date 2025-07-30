@@ -1,0 +1,100 @@
+#cloud-config
+# Example cloud-init user-data for database server
+
+hostname: db-server
+manage_etc_hosts: true
+
+users:
+  - default
+  - name: ubuntu
+    groups: [adm, audio, cdrom, dialout, dip, floppy, lxd, netdev, plugdev, sudo, video]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: false
+
+# Update and install packages
+package_update: true
+package_upgrade: true
+packages:
+  - postgresql
+  - postgresql-contrib
+  - postgresql-client
+  - ufw
+  - htop
+  - iotop
+  - ncdu
+
+# Configure PostgreSQL
+write_files:
+  - path: /etc/postgresql/14/main/conf.d/custom.conf
+    content: |
+      # Custom PostgreSQL configuration
+      listen_addresses = '*'
+      max_connections = 200
+      shared_buffers = 1GB
+      effective_cache_size = 3GB
+      maintenance_work_mem = 256MB
+      checkpoint_completion_target = 0.9
+      wal_buffers = 16MB
+      default_statistics_target = 100
+      random_page_cost = 1.1
+      effective_io_concurrency = 200
+      work_mem = 4MB
+      min_wal_size = 1GB
+      max_wal_size = 4GB
+
+  - path: /etc/postgresql/14/main/pg_hba.conf.d/custom.conf
+    content: |
+      # Allow connections from local network
+      host    all             all             10.0.0.0/8              md5
+      host    all             all             172.16.0.0/12           md5
+      host    all             all             192.168.0.0/16          md5
+
+runcmd:
+  # Configure UFW
+  - ufw allow 22/tcp
+  - ufw allow 5432/tcp
+  - ufw --force enable
+  
+  # Configure PostgreSQL
+  - |
+    # Wait for PostgreSQL to be ready
+    while ! pg_isready; do
+      sleep 1
+    done
+    
+    # Create application database and user
+    sudo -u postgres psql <<EOF
+    CREATE USER appuser WITH ENCRYPTED PASSWORD 'changeme';
+    CREATE DATABASE appdb OWNER appuser;
+    GRANT ALL PRIVILEGES ON DATABASE appdb TO appuser;
+    EOF
+  
+  # Restart PostgreSQL with new config
+  - systemctl restart postgresql
+  
+  # Create backup script
+  - |
+    cat > /usr/local/bin/backup-postgres.sh <<'EOF'
+    #!/bin/bash
+    BACKUP_DIR="/var/backups/postgresql"
+    mkdir -p "$BACKUP_DIR"
+    sudo -u postgres pg_dumpall | gzip > "$BACKUP_DIR/backup-$(date +%Y%m%d-%H%M%S).sql.gz"
+    find "$BACKUP_DIR" -name "backup-*.sql.gz" -mtime +7 -delete
+    EOF
+    chmod +x /usr/local/bin/backup-postgres.sh
+  
+  # Setup daily backup cron
+  - echo "0 2 * * * root /usr/local/bin/backup-postgres.sh" > /etc/cron.d/postgres-backup
+  
+  # Log deployment info
+  - echo "Database server deployment completed at $(date)" >> /var/log/cloud-init-deployment.log
+
+# System tuning for database workload
+bootcmd:
+  - echo 'vm.swappiness=10' >> /etc/sysctl.d/99-db-tuning.conf
+  - echo 'vm.dirty_ratio=15' >> /etc/sysctl.d/99-db-tuning.conf
+  - echo 'vm.dirty_background_ratio=5' >> /etc/sysctl.d/99-db-tuning.conf
+  - sysctl -p /etc/sysctl.d/99-db-tuning.conf
+
+final_message: "Database server deployment completed at $TIMESTAMP"

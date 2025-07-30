@@ -1,0 +1,56 @@
+#cloud-config
+# Cloud-init configuration for template-based VMs
+
+hostname: ${hostname}
+fqdn: ${hostname}.${domain}
+manage_etc_hosts: true
+
+# Regenerate SSH keys on first boot
+ssh_deletekeys: true
+ssh_genkeytypes: ['rsa', 'ecdsa', 'ed25519']
+
+# User configuration
+users:
+  - name: ubuntu
+    groups: [adm, audio, cdrom, dialout, dip, floppy, lxd, netdev, plugdev, sudo, video]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+# Update packages
+package_update: true
+package_upgrade: false
+
+# Timezone
+timezone: ${timezone}
+
+# First boot commands
+runcmd:
+  # Regenerate machine ID
+  - rm -f /etc/machine-id /var/lib/dbus/machine-id
+  - systemd-machine-id-setup
+  - ln -s /etc/machine-id /var/lib/dbus/machine-id
+  
+  # Set hostname in hosts file
+  - |
+    sed -i "s/127.0.1.1.*/127.0.1.1 ${hostname}.${domain} ${hostname}/" /etc/hosts
+  
+  # Log deployment
+  - logger "VM ${hostname} deployed from template ${template_name}"
+
+# Write deployment info
+write_files:
+  - path: /etc/deployment-info.json
+    content: |
+      {
+        "hostname": "${hostname}",
+        "template": "${template_name}",
+        "deployed": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+        "provider": "parallels-desktop",
+        "orchestrator": "opentofu"
+      }
+    permissions: '0644'
+
+final_message: "VM ${hostname} ready after $UPTIME seconds"

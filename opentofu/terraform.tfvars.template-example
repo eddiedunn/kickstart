@@ -1,0 +1,103 @@
+# Example configuration for deploying VMs from templates
+
+# Default template name (created from ubuntu-minimal-test)
+default_template_name = "ubuntu-minimal-test-template"
+
+# SSH keys to inject into VMs
+default_ssh_keys = [
+  # Add your SSH public keys here
+  # "ssh-rsa AAAAB3NzaC1yc2E... user@host",
+  # "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5... user@host"
+]
+
+# Deploy VMs from templates
+template_vms = {
+  # Web servers
+  "web-01" = {
+    template_name = "ubuntu-minimal-test-template"
+    cpus          = 2
+    memory        = 2048
+    linked_clone  = true
+    cloud_init    = true
+    user_data     = <<-EOF
+      #cloud-config
+      hostname: web-01
+      packages:
+        - nginx
+        - certbot
+      runcmd:
+        - systemctl enable nginx
+        - systemctl start nginx
+    EOF
+  }
+  
+  "web-02" = {
+    template_name = "ubuntu-minimal-test-template"
+    cpus          = 2
+    memory        = 2048
+    linked_clone  = true
+    cloud_init    = true
+    user_data     = <<-EOF
+      #cloud-config
+      hostname: web-02
+      packages:
+        - nginx
+        - certbot
+      runcmd:
+        - systemctl enable nginx
+        - systemctl start nginx
+    EOF
+  }
+  
+  # Database server
+  "db-01" = {
+    template_name = "ubuntu-minimal-test-template"
+    cpus          = 4
+    memory        = 8192
+    linked_clone  = true
+    cloud_init    = true
+    user_data     = <<-EOF
+      #cloud-config
+      hostname: db-01
+      packages:
+        - postgresql
+        - postgresql-contrib
+      runcmd:
+        - systemctl enable postgresql
+        - systemctl start postgresql
+    EOF
+  }
+  
+  # Application server
+  "app-01" = {
+    template_name = "ubuntu-minimal-test-template"
+    cpus          = 2
+    memory        = 4096
+    linked_clone  = true
+    cloud_init    = true
+    user_data     = <<-EOF
+      #cloud-config
+      hostname: app-01
+      packages:
+        - python3-pip
+        - python3-venv
+        - redis-server
+      runcmd:
+        - systemctl enable redis-server
+        - systemctl start redis-server
+    EOF
+  }
+}
+
+# Example: Deploy from PVM bundle (uncomment to use)
+# pvm_vms = {
+#   "imported-01" = {
+#     pvm_path     = "./templates/ubuntu-template-20240130.pvm"
+#     cpus         = 2
+#     memory       = 4096
+#     cloud_init   = true
+#   }
+# }
+
+# Enable cloud-init for all VMs by default
+enable_cloud_init = true
