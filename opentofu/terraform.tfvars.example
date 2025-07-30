@@ -6,7 +6,7 @@
 # default_cpus      = 2
 # default_memory    = 4096  # MB
 # default_disk_size = 30    # GB
-# default_iso_path  = "../output/ubuntu-24.04-arm64-autoinstall-20250729-123456.iso"
+# default_iso_path  = "../output/ubuntu-22.04.5-autoinstall-arm64.iso"
 
 # Multi-VM deployment (stack mode)
 # Define multiple VMs for your development stack:
@@ -16,7 +16,7 @@ vm_definitions = {
     cpus        = 2
     memory      = 2048
     disk_size   = 20
-    iso_path    = "../output/ubuntu-24.04-arm64-autoinstall-20250729-123456.iso"
+    iso_path    = "../output/ubuntu-22.04.5-autoinstall-arm64.iso"
     network     = "shared"
     start_after = []
   },
@@ -25,7 +25,7 @@ vm_definitions = {
     cpus        = 4
     memory      = 4096
     disk_size   = 50
-    iso_path    = "../output/ubuntu-24.04-arm64-autoinstall-20250729-123456.iso"
+    iso_path    = "../output/ubuntu-22.04.5-autoinstall-arm64.iso"
     network     = "shared"
     start_after = []
   },
@@ -34,7 +34,7 @@ vm_definitions = {
     cpus        = 2
     memory      = 2048
     disk_size   = 20
-    iso_path    = "../output/ubuntu-24.04-arm64-autoinstall-20250729-123456.iso"
+    iso_path    = "../output/ubuntu-22.04.5-autoinstall-arm64.iso"
     network     = "shared"
     start_after = ["db"]  # Start after db VM
   }

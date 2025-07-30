@@ -66,25 +66,48 @@ check_prerequisites() {
 validate_iso_paths() {
     log_info "Validating ISO paths in configuration..."
     
-    # Extract ISO paths from tfvars
-    local iso_paths=$(grep -E 'iso_path\s*=' "${OPENTOFU_DIR}/terraform.tfvars" | \
-                     sed -E 's/.*iso_path\s*=\s*"([^"]+)".*/\1/' | \
-                     sort -u)
+    # Extract ISO paths from tfvars - handle both single VM and multi-VM formats
+    local iso_paths=$(awk -F'"' '/(default_)?iso_path[[:space:]]*=/ {print $2}' "${OPENTOFU_DIR}/terraform.tfvars" | \
+                     grep -v '^$' | sort -u)
+    
+    # If no ISO paths found, check if the tfvars file is properly formatted
+    if [ -z "$iso_paths" ]; then
+        log_error "No ISO paths found in terraform.tfvars"
+        log_info "Make sure your terraform.tfvars contains either:"
+        echo "  default_iso_path = \"path/to/iso\""
+        echo "  or iso_path entries in vm_definitions"
+        exit 1
+    fi
     
     local missing_isos=()
-    for iso in $iso_paths; do
+    local found_isos=()
+    
+    while IFS= read -r iso; do
+        # Skip empty lines
+        [ -z "$iso" ] && continue
+        
         # Resolve relative paths from opentofu directory
         local full_path="${iso}"
         if [[ ! "$iso" = /* ]]; then
             full_path="${OPENTOFU_DIR}/${iso}"
         fi
         
+        # Normalize path
+        full_path=$(cd "${OPENTOFU_DIR}" && realpath -m "$iso" 2>/dev/null || echo "$full_path")
+        
         if [ ! -f "$full_path" ]; then
             missing_isos+=("$iso")
+            log_warn "✗ Missing ISO: $iso (resolved to: $full_path)"
         else
-            log_info "✓ Found ISO: $(basename "$iso")"
+            found_isos+=("$iso")
+            log_info "✓ Found ISO: $(basename "$iso") ($(du -h "$full_path" | cut -f1))"
         fi
-    done
+    done <<< "$iso_paths"
+    
+    # Summary
+    if [ ${#found_isos[@]} -gt 0 ]; then
+        log_info "Found ${#found_isos[@]} ISO file(s)"
+    fi
     
     if [ ${#missing_isos[@]} -gt 0 ]; then
         log_error "Missing ISO files:"

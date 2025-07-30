@@ -82,3 +82,7 @@ cache/
 # Test outputs
 test-results/
 coverage/
+
+iso_check/
+
+iso_diagnose/

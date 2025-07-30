@@ -116,6 +116,9 @@ create_autoinstall_config() {
     shift
     local ssh_keys=("$@")
     
+    # Detect if we're building for ARM64
+    local arch="${DETECTED_ARCH:-amd64}"
+    
     cat > "$output_file" << 'EOF'
 #cloud-config
 autoinstall:
@@ -130,15 +133,23 @@ autoinstall:
   network:
     version: 2
     ethernets:
-      enp0s5:  # Parallels default
+      enp0s5:  # Parallels default (works on both architectures)
         dhcp4: true
         dhcp6: false
         optional: true
-      enp0s3:  # VirtualBox default
+      eth0:    # Common ARM64 interface name
         dhcp4: true
         dhcp6: false
         optional: true
-      ens33:   # VMware default
+      enp0s3:  # VirtualBox default (x86)
+        dhcp4: true
+        dhcp6: false
+        optional: true
+      ens160:  # VMware on ARM64
+        dhcp4: true
+        dhcp6: false
+        optional: true
+      ens33:   # VMware default (x86)
         dhcp4: true
         dhcp6: false
         optional: true
@@ -151,20 +162,23 @@ autoinstall:
   identity:
     hostname: ubuntu-server
     username: ubuntu
-    # Temporary password 'ubuntu' - will be locked after SSH keys are installed
+    # Password 'ubuntu' - required for initial setup
     password: "$6$rounds=4096$8dkK1P/oE$2DGKKt0wLlTVJ7USY.0jN9du8FetmEr51yjPyeiR.zKE3DGFcitNL/nF1l62BLJNR87lQZixObuXYny.Mf17K1"
   
   ssh:
     install-server: true
     allow-pw: false
+    authorized-keys:
 EOF
 
     # Add SSH keys if provided
     if [ ${#ssh_keys[@]} -gt 0 ]; then
-        echo "    authorized-keys:" >> "$output_file"
         for key_file in "${ssh_keys[@]}"; do
-            echo "      - $(cat "$key_file")" >> "$output_file"
+            echo "      - \"$(cat "$key_file")\"" >> "$output_file"
         done
+    else
+        # If no keys provided, add empty list
+        echo "      []" >> "$output_file"
     fi
     
     cat >> "$output_file" << 'EOF'
@@ -183,37 +197,20 @@ EOF
   updates: security
   
   late-commands:
-    # Lock password after SSH keys are installed
-    - curtin in-target --target=/target -- passwd -l ubuntu
     # Ensure proper SSH directory permissions
     - curtin in-target --target=/target -- mkdir -p /home/ubuntu/.ssh
     - curtin in-target --target=/target -- chmod 700 /home/ubuntu/.ssh
     - curtin in-target --target=/target -- chown -R ubuntu:ubuntu /home/ubuntu/.ssh
     # Enable services
-    - curtin in-target --target=/target -- systemctl enable ssh
+    - curtin in-target --target=/target -- systemctl enable ssh || true
     - curtin in-target --target=/target -- systemctl enable qemu-guest-agent || true
     # Remove cloud-init default network config to prevent conflicts
-    - rm -f /target/etc/cloud/cloud.cfg.d/50-curtin-networking.cfg
-    - rm -f /target/etc/cloud/cloud.cfg.d/subiquity-disable-cloudinit-networking.cfg
-    # Set timezone
-    - curtin in-target --target=/target -- timedatectl set-timezone UTC
+    - rm -f /target/etc/cloud/cloud.cfg.d/50-curtin-networking.cfg || true
+    - rm -f /target/etc/cloud/cloud.cfg.d/subiquity-disable-cloudinit-networking.cfg || true
   
   user-data:
     disable_root: true
     ssh_pwauth: false
-    
-    users:
-      - name: ubuntu
-        groups: [adm, cdrom, dip, lxd, plugdev, sudo]
-        sudo: ALL=(ALL) NOPASSWD:ALL
-        shell: /bin/bash
-        lock_passwd: true
-    
-    # Write info file on first boot
-    runcmd:
-      - echo "Ubuntu Server - Autoinstalled on $(date)" > /etc/motd
-      - hostnamectl set-hostname ubuntu-$(openssl rand -hex 3)
-      - systemctl restart systemd-networkd
   
   shutdown: reboot
 EOF
@@ -230,8 +227,8 @@ update_boot_config() {
         log_info "Updating $(basename "$(dirname "$grub_file")")/grub.cfg"
         
         # Add autoinstall parameters to kernel command line
-        perl -pi -e 's|(linux\s+/casper/vmlinuz[^\s]*)\s+---|\1 autoinstall ds=nocloud\;s=/cdrom/nocloud/ ---|g' "$grub_file"
-        perl -pi -e 's|(linux\s+/casper/hwe-vmlinuz[^\s]*)\s+---|\1 autoinstall ds=nocloud\;s=/cdrom/nocloud/ ---|g' "$grub_file"
+        perl -pi -e 's|(linux\s+/casper/vmlinuz[^\s]*)\s+(.*?)(\s+---)|\1 \2 autoinstall ds=nocloud\;s=/cdrom/nocloud/\3|g' "$grub_file"
+        perl -pi -e 's|(linux\s+/casper/hwe-vmlinuz[^\s]*)\s+(.*?)(\s+---)|\1 \2 autoinstall ds=nocloud\;s=/cdrom/nocloud/\3|g' "$grub_file"
         
         # Reduce timeout for faster boot
         perl -pi -e 's|timeout=[0-9]+|timeout=1|g' "$grub_file"
@@ -258,9 +255,15 @@ build_iso() {
     if xorriso -indev "$input_iso" -report_el_torito as_mkisofs 2>/dev/null > mkisofs.opts; then
         # Use original boot configuration
         log_info "Using original ISO boot configuration"
+        # Truncate volume ID if too long (max 32 chars)
+        local vol_label="${volume_id}-Autoinstall"
+        if [ ${#vol_label} -gt 32 ]; then
+            vol_label="${volume_id:0:20}-Autoinstall"
+        fi
+        
         eval xorriso -as mkisofs \
             -r \
-            -V "'$volume_id-Autoinstall'" \
+            -V "'$vol_label'" \
             -o "'$output_iso'" \
             $(grep -v "^-V" mkisofs.opts | tr '\n' ' ') \
             . 2>&1 || {
@@ -277,10 +280,16 @@ build_iso_fallback() {
     local volume_id="$2"
     local arch="$3"
     
+    # Truncate volume ID if too long (max 32 chars)
+    local vol_label="${volume_id}-Autoinstall"
+    if [ ${#vol_label} -gt 32 ]; then
+        vol_label="${volume_id:0:20}-Autoinstall"
+    fi
+    
     if [ "$arch" = "amd64" ]; then
         xorriso -as mkisofs \
             -r \
-            -V "$volume_id-Autoinstall" \
+            -V "$vol_label" \
             -o "$output_iso" \
             -J -joliet-long \
             -l \
@@ -297,7 +306,7 @@ build_iso_fallback() {
         # ARM64 doesn't use legacy BIOS boot
         xorriso -as mkisofs \
             -r \
-            -V "$volume_id-Autoinstall" \
+            -V "$vol_label" \
             -o "$output_iso" \
             -J -joliet-long \
             -l \
@@ -345,7 +354,10 @@ main() {
     log_info "Selecting SSH keys..."
     local ssh_keys=()
     if selected=$(select_ssh_keys); then
-        mapfile -t ssh_keys <<< "$selected"
+        # Use a more portable method instead of mapfile
+        while IFS= read -r key; do
+            [ -n "$key" ] && ssh_keys+=("$key")
+        done <<< "$selected"
         log_info "Selected ${#ssh_keys[@]} SSH key(s)"
     else
         log_error "No SSH keys available. Exiting."
@@ -365,7 +377,7 @@ main() {
     # Create autoinstall configuration
     log_info "Creating autoinstall configuration..."
     mkdir -p nocloud
-    create_autoinstall_config "nocloud/user-data" "${ssh_keys[@]}"
+    DETECTED_ARCH="$arch" create_autoinstall_config "nocloud/user-data" "${ssh_keys[@]}"
     
     # Create meta-data
     cat > nocloud/meta-data << EOF

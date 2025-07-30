@@ -1,0 +1,9 @@
+{
+  "name": "ubuntu-server",
+  "status": "",
+  "ip": "",
+  "uuid": "",
+  "cpus": 2,
+  "memory": 4096,
+  "disk_size": 30
+}
